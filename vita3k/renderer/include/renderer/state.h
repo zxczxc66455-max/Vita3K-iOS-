@@ -117,10 +117,13 @@ struct State {
     uint32_t shaders_count_compiled = 0;
     uint32_t programs_count_pre_compiled = 0;
 
-    bool should_display;
+    // Written by guest/vblank threads and consumed by the render thread.
+    std::atomic<bool> should_display{ false };
 
-    // Diagnostic counter: number of frames the host render loop has presented.
+    // Render-loop iterations; may include skipped/failed presentation attempts.
     std::atomic<uint64_t> host_frames_presented{ 0 };
+    // Vulkan presents accepted by the swapchain (success or suboptimal).
+    std::atomic<uint64_t> swapchain_presentations{ 0 };
 
     // Diagnostic counter: number of GXM command batches executed by the
     // render loop. If this stops advancing while guest threads keep queueing

@@ -591,6 +591,8 @@ void ScreenRenderer::swap_window() {
     };
 
     auto result = state.general_queue.presentKHR(&present_info);
+    if (result == vk::Result::eSuccess || result == vk::Result::eSuboptimalKHR)
+        state.swapchain_presentations.fetch_add(1, std::memory_order_relaxed);
     if (result == vk::Result::eSuboptimalKHR) {
         need_rebuild = !surface_matches_window_size();
     } else if (result == vk::Result::eErrorOutOfDateKHR || result == vk::Result::eErrorSurfaceLostKHR) {

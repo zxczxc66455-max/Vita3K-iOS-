@@ -3214,6 +3214,9 @@ int main(int argc, char *argv[]) {
     LOG_INFO("GFX diagnostics: mode={} (0 off, 1 summary, 2 sampled shaders), culling={} metal_hud_requested={} title={}",
         render_diagnostics::mode, ios_runtime::tuning.conservative_culling, ios_runtime::tuning.metal_hud_requested, emuenv->io.app_path);
     std::size_t perf_last_frame_count = emuenv->frame_count.load(std::memory_order_relaxed);
+    uint64_t perf_last_present_count = emuenv->renderer->swapchain_presentations.load(std::memory_order_relaxed);
+    uint64_t perf_last_vblank_count = emuenv->display.vblank_count.load(std::memory_order_relaxed);
+    Uint64 perf_log_last_ms = perf_last_ms;
     Uint64 playtime_checkpoint_ms = perf_last_ms;
 
     IOSInputSession text_input;
@@ -3312,10 +3315,26 @@ int main(int argc, char *argv[]) {
                     const std::size_t frames = emuenv->frame_count.load(std::memory_order_relaxed);
                     const float fps = static_cast<float>(frames - perf_last_frame_count) * 1000.0f
                         / static_cast<float>(now_ms - perf_last_ms);
+                    const uint64_t presents = emuenv->renderer->swapchain_presentations.load(std::memory_order_relaxed);
+                    const uint64_t vblanks = emuenv->display.vblank_count.load(std::memory_order_relaxed);
+                    const float present_fps = static_cast<float>(presents - perf_last_present_count) * 1000.0f
+                        / static_cast<float>(now_ms - perf_last_ms);
+                    const float vblank_hz = static_cast<float>(vblanks - perf_last_vblank_count) * 1000.0f
+                        / static_cast<float>(now_ms - perf_last_ms);
+                    const int active_fps_limit = emuenv->display.fps_limit.load(std::memory_order_relaxed);
+                    perf_last_present_count = presents;
+                    perf_last_vblank_count = vblanks;
                     perf_last_frame_count = frames;
                     perf_last_ms = now_ms;
                     const float frametime_ms = fps > 0.01f ? 1000.0f / fps : 0.0f;
-                    vita3k_ios_update_perf_overlay(fps, frametime_ms);
+                    vita3k_ios_update_perf_overlay(fps, present_fps, active_fps_limit, frametime_ms);
+                    if (now_ms - perf_log_last_ms >= 10000) {
+                        LOG_INFO("Frame pacing: game={:.1f} FPS present={:.1f} FPS vblank={:.1f} Hz cap={} (0=off) vsync={} cpu={} resolution={}x",
+                            fps, present_fps, vblank_hz, active_fps_limit,
+                            emuenv->renderer->vsync_enabled.load(std::memory_order_relaxed),
+                            ios_runtime::uses_jit() ? "JIT" : "IR", emuenv->cfg.current_config.resolution_multiplier);
+                        perf_log_last_ms = now_ms;
+                    }
                     render_diagnostics::Snapshot graphics;
                     if (graphics_reporter.poll(now_ms, graphics)) {
                         const auto &v = graphics.values;

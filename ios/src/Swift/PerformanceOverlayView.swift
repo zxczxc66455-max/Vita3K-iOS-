@@ -11,6 +11,8 @@ final class PerformanceState: ObservableObject {
     static let shared = PerformanceState()
 
     @Published private(set) var guestFPS: Double = 0
+    @Published private(set) var presentFPS: Double = 0
+    @Published private(set) var fpsLimit: Int = 60
     @Published private(set) var frametimeMilliseconds: Double = 0
     @Published private(set) var memoryMegabytes: Double = 0
     /// -1 when the system will not report a level.
@@ -24,8 +26,10 @@ final class PerformanceState: ObservableObject {
 
     private static let historyLength = 60
 
-    fileprivate func update(fps: Double, frametime: Double, memory: Double, battery: Int) {
+    fileprivate func update(fps: Double, presentFPS: Double, limit: Int, frametime: Double, memory: Double, battery: Int) {
         guestFPS = fps
+        self.presentFPS = presentFPS
+        fpsLimit = limit
         frametimeMilliseconds = frametime
         memoryMegabytes = memory
         batteryPercent = battery
@@ -45,10 +49,10 @@ final class PerformanceState: ObservableObject {
 @objc(TsubomiPerformanceStateBridge)
 @MainActor
 final class PerformanceStateBridge: NSObject {
-    @objc(updateWithFPS:frametime:memoryMB:batteryPercent:)
-    static func update(fps: Double, frametime: Double, memoryMB: Double, batteryPercent: Int) {
+    @objc(updateWithFPS:presentFPS:limit:frametime:memoryMB:batteryPercent:)
+    static func update(fps: Double, presentFPS: Double, limit: Int, frametime: Double, memoryMB: Double, batteryPercent: Int) {
         PerformanceState.shared.update(
-            fps: fps, frametime: frametime, memory: memoryMB, battery: batteryPercent)
+            fps: fps, presentFPS: presentFPS, limit: limit, frametime: frametime, memory: memoryMB, battery: batteryPercent)
     }
 
     @objc(setVisible:)
@@ -121,7 +125,8 @@ struct PerformanceOverlayView: View {
     private var readout: String {
         var parts: [String] = []
         if showFPS {
-            parts.append("\(Int(state.guestFPS.rounded())) FPS")
+            let cap = state.fpsLimit == 0 ? "Off" : String(state.fpsLimit)
+            parts.append("Game \(Int(state.guestFPS.rounded())) · Present \(Int(state.presentFPS.rounded())) FPS · Cap \(cap)")
         }
         if showFrametime {
             parts.append(state.frametimeMilliseconds > 0
@@ -133,6 +138,9 @@ struct PerformanceOverlayView: View {
         }
         if showBattery, state.batteryPercent >= 0 {
             parts.append("\(state.batteryPercent)%")
+        }
+        if showFPS, parts.count > 1 {
+            return parts[0] + "\n" + parts.dropFirst().joined(separator: "  ·  ")
         }
         return parts.joined(separator: "  ·  ")
     }

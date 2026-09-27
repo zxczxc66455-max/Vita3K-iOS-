@@ -560,7 +560,7 @@ struct SettingsView: View {
             Text("Performance overlay")
         } footer: {
             settingsHelp {
-                Text("The Tsubomi overlay appears in-game once any metric is enabled. FPS counts guest frame submissions; frametime is calculated from the one-second FPS average, not measured GPU execution time. Live log shows a compact tail. Drag its header, collapse it or use × to hide it; export the log for full details.")
+                Text("The Tsubomi overlay appears in-game once any metric is enabled. Game FPS counts guest submissions; Present FPS counts accepted Vulkan presents; Cap shows the active limit. A cap of 60 cannot raise a game producing 20 FPS. Frametime is the guest average, not GPU execution time. Live log shows a compact tail. Drag its header, collapse it or use × to hide it; export the log for full details.")
             }
         }
     }

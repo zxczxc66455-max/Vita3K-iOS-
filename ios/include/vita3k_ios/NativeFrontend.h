@@ -195,9 +195,9 @@ void vita3k_ios_install_orientation_policy();
 void vita3k_ios_apply_orientation_lock();
 
 // In-game performance HUD. Called ~once per second from the frontend loop
-// with the guest frame rate; battery/RAM are sampled on the UIKit side. The
+// with guest submissions, accepted Vulkan presents and the active cap. The
 // HUD only appears when the user enabled at least one metric in settings.
-void vita3k_ios_update_perf_overlay(float guest_fps, float frametime_ms);
+void vita3k_ios_update_perf_overlay(float guest_fps, float present_fps, int fps_limit, float frametime_ms);
 void vita3k_ios_hide_perf_overlay();
 
 // Dismisses the import-in-progress overlay and shows the outcome. Failures are

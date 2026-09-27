@@ -21,6 +21,13 @@ class FPSSettingsTests(unittest.TestCase):
         start = main.index("    const auto restore_global_config = [&] {")
         restore = main[start:main.index("\n    take_cpu_backend_error();", start)]
         fixture = (Path(__file__).parent / "fps_settings.cpp").read_text()
+        state = (ROOT / "vita3k/renderer/include/renderer/state.h").read_text()
+        signal = next(line for line in state.splitlines() if "should_display{" in line)
+        fixture = fixture.replace("// RENDER_SIGNAL", signal)
+        screen = (ROOT / "vita3k/renderer/src/vulkan/screen_renderer.cpp").read_text()
+        start = screen.index("    auto result = state.general_queue.presentKHR(&present_info);")
+        counter = screen[start:screen.index("    if (result == vk::Result::eSuboptimalKHR)", start)]
+        fixture = fixture.replace("// PRESENT_COUNTER", counter)
         fixture = fixture.replace("// PREDICTION", prediction).replace("// LAUNCH", launch).replace("// RESTORE", restore)
         with tempfile.TemporaryDirectory() as directory:
             cpp = Path(directory) / "fps.cpp"

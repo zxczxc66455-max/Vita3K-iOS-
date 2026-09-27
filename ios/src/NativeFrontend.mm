@@ -1847,9 +1847,9 @@ static void update_log_overlay(UIWindow *window) {
     }
 }
 
-void vita3k_ios_update_perf_overlay(const float guest_fps, const float frametime_ms) {
+void vita3k_ios_update_perf_overlay(const float guest_fps, const float present_fps, const int fps_limit, const float frametime_ms) {
     // Memory and battery are sampled here (UIKit side) and pushed, along with
-    // the guest FPS and frametime, into the SwiftUI PerformanceState. The
+    // guest/present FPS, the active cap and frametime, into PerformanceState. The
     // readout itself is drawn by PerformanceOverlayView inside the controls
     // overlay - this no longer builds a UIKit HUD. The live-log panel is still
     // UIKit and is updated below.
@@ -1905,6 +1905,8 @@ void vita3k_ios_update_perf_overlay(const float guest_fps, const float frametime
         const NSInteger batteryPercent = level >= 0 ? static_cast<NSInteger>(level * 100.0f + 0.5f) : -1;
 
         [TsubomiPerformanceStateBridge updateWithFPS:fps
+                                          presentFPS:present_fps
+                                               limit:fps_limit
                                            frametime:ft
                                             memoryMB:memoryMB
                                       batteryPercent:batteryPercent];

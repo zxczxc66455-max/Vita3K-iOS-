@@ -7,6 +7,7 @@
 #include <mutex>
 #include <optional>
 #include <vector>
+#include <thread>
 using namespace std::chrono_literals;
 using Address = unsigned;
 #define LOG_TRACE(...) ((void)0)
@@ -24,7 +25,9 @@ struct Display {
     std::atomic<int> fps_limit{60};
     bool presentation_due_now() { ++gate_calls; return allow; }
 };
-struct Renderer { bool should_display = false; };
+struct Renderer {
+// RENDER_SIGNAL
+};
 struct EmuEnvState {
     Display display;
     struct { int current_config = 0; } cfg;
@@ -51,6 +54,25 @@ static void check_launch_and_restore() {
             if (session_settings) assert(emuenv->cfg.current_config == saved_current_config);
         }
     }
+}
+namespace vk {
+enum class Result { eSuccess, eSuboptimalKHR, eErrorOutOfDateKHR, eErrorSurfaceLostKHR, eErrorDeviceLost };
+}
+static void check_present_counter() {
+    struct {
+        struct {
+            vk::Result result;
+            vk::Result presentKHR(int *) { return result; }
+        } general_queue;
+        std::atomic<uint64_t> swapchain_presentations{0};
+    } state{};
+    int present_info = 0;
+    for (auto status : {vk::Result::eSuccess, vk::Result::eSuboptimalKHR,
+             vk::Result::eErrorOutOfDateKHR, vk::Result::eErrorSurfaceLostKHR, vk::Result::eErrorDeviceLost}) {
+        state.general_queue.result = status;
+        // PRESENT_COUNTER
+    }
+    assert(state.swapchain_presentations == 2);
 }
 int main() {
     using Clock = util::PresentationLimiter::Clock;
@@ -86,5 +108,23 @@ int main() {
     env.display.allow = true;
     update_prediction(env, frame);
     assert(env.display.gate_calls == 2 && env.renderer->should_display);
+    // Reported 20 FPS workload: none of the supported caps may throttle it.
+    for (int limit : {0, 30, 60}) {
+        util::PresentationLimiter limiter;
+        for (int frame = 0; frame < 20; ++frame)
+            assert(limiter.due(limit, start + std::chrono::milliseconds(50 * frame)));
+    }
+    Renderer shared;
+    assert(!shared.should_display.load());
+    std::thread producer([&] {
+        for (int i = 0; i < 1000; ++i) {
+            while (shared.should_display.load()) std::this_thread::yield();
+            shared.should_display.store(true);
+        }
+    });
+    for (int i = 0; i < 1000; ++i)
+        while (!shared.should_display.exchange(false)) std::this_thread::yield();
+    producer.join();
+    check_present_counter();
     check_launch_and_restore();
 }

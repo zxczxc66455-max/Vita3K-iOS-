@@ -205,8 +205,18 @@ Settings → Graphics & Display → Video offers 30 FPS, 60 FPS and Unlimited.
 60 is the default; Unlimited is stored as zero. These options cap host
 presentation requests without changing the Vita's 60 Hz vblank clock, CPU speed
 or native game frame-rate limit. V-Sync and device presentation modes can still
-limit Unlimited. The FPS overlay counts guest submissions, so it can differ
-from the presentation cap.
+limit Unlimited. Selecting 60 cannot raise a game that only produces 20 FPS.
+
+The FPS overlay separates Game (guest framebuffer submissions), Present
+(Vulkan presents accepted with success/suboptimal status), and Cap (the active
+runtime setting; Off means Unlimited). Present is not a physical scanout
+measurement. A failed or skipped present does not increment it. The shared
+display-request flag is initialized and atomic across guest/render threads.
+Every ten seconds, `Frame pacing:` in `tsubomi.log` records these rates plus
+vblank frequency, V-Sync, JIT/IR backend and resolution. For a persistent
+20 FPS report, collect this log after 30 seconds of gameplay together with
+the game, device and IPA build revision; the selected cap alone cannot
+distinguish a native game limit from CPU/GPU load or presentation stalls.
 
 Global values persist in `tsubomi.presentationFPS`; title overrides store
 `presentationFPS` in their existing settings dictionary. A missing title field
