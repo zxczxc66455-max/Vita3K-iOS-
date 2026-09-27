@@ -53,6 +53,7 @@
 #include <renderer/state.h>
 #include <touch/functions.h>
 #include <touch/state.h>
+#include <util/presentation_limiter.h>
 #include <util/render_diagnostics.h>
 #include <util/fs.h>
 #include <util/ios_runtime_tuning.h>
@@ -731,7 +732,7 @@ Vita3KIOSSettings native_settings(EmuEnvState &emuenv) {
         .resolution_multiplier = current.resolution_multiplier,
         .v_sync = current.v_sync,
         .shader_cache = current.shader_cache,
-        .fps_limit = 60,
+        .fps_limit = vita3k_ios_load_fps_limit(),
         .cpu_opt = current.cpu_opt,
         .ngs_enable = current.ngs_enable,
         .async_pipeline_compilation = current.async_pipeline_compilation,
@@ -2431,8 +2432,9 @@ void apply_native_settings(EmuEnvState &emuenv, const Vita3KIOSSettings &setting
     }
 
     const auto result = app::commit_settings(emuenv, desired);
+    vita3k_ios_save_fps_limit(settings.fps_limit);
     emuenv.display.fps_hack = false;
-    emuenv.display.fps_limit.store(60, std::memory_order_relaxed);
+    emuenv.display.fps_limit.store(util::normalize_fps_limit(settings.fps_limit), std::memory_order_relaxed);
     std::vector<std::string> restart_required;
     restart_required.reserve(result.restart_required_settings.size());
     for (const auto setting : result.restart_required_settings)
@@ -2457,9 +2459,9 @@ void apply_game_session_settings(EmuEnvState &emuenv, const Vita3KIOSSettings &s
     current.high_accuracy = settings.high_accuracy;
     current.disable_surface_sync = !settings.surface_sync;
     current.memory_mapping = ios_memory_mapping_for(settings);
-    emuenv.display.fps_limit.store(60, std::memory_order_relaxed);
-    LOG_INFO("Per-game settings override active: res x{} vsync={} fps=60 cpu_opt={} ngs={} async={} aniso={} high_accuracy={} surface_sync={} double_buffer={}",
-        settings.resolution_multiplier, settings.v_sync, settings.cpu_opt,
+    emuenv.display.fps_limit.store(util::normalize_fps_limit(settings.fps_limit), std::memory_order_relaxed);
+    LOG_INFO("Per-game settings override active: res x{} vsync={} fps={} cpu_opt={} ngs={} async={} aniso={} high_accuracy={} surface_sync={} double_buffer={}",
+        settings.resolution_multiplier, settings.v_sync, util::normalize_fps_limit(settings.fps_limit), settings.cpu_opt,
         settings.ngs_enable, settings.async_pipeline_compilation, settings.anisotropic_filtering,
         settings.high_accuracy, settings.surface_sync, settings.double_buffer);
 }
@@ -3027,10 +3029,9 @@ int main(int argc, char *argv[]) {
     const auto session_settings = std::exchange(g_pending_game_settings, std::nullopt);
     const auto saved_current_config = emuenv->cfg.current_config;
     const auto restore_global_config = [&] {
-        if (session_settings) {
+        if (session_settings)
             emuenv->cfg.current_config = saved_current_config;
-            emuenv->display.fps_limit.store(60, std::memory_order_relaxed);
-        }
+        emuenv->display.fps_limit.store(vita3k_ios_load_fps_limit(), std::memory_order_relaxed);
     };
 
     take_cpu_backend_error(); // Drop any failure retained from the previous session.
@@ -3077,8 +3078,15 @@ int main(int argc, char *argv[]) {
                     jit_pool_prewarmed = true;
                 }
 
-                if (boot_error.empty())
+                if (boot_error.empty()) {
+                    // Runtime initialization can reset display state. Install the
+                    // selected cap before any guest thread starts submitting frames.
+                    emuenv->display.fps_limit.store(session_settings
+                            ? util::normalize_fps_limit(session_settings->fps_limit)
+                            : vita3k_ios_load_fps_limit(),
+                        std::memory_order_relaxed);
                     SDL_Log("Vita3K iOS: load_and_run");
+                }
                 if (boot_error.empty() && !session_controller.load_and_run())
                     boot_error = "Could not load or start the game. If this is a retail dump, the "
                                  "content may still be encrypted — import the .pkg with its "
@@ -3114,7 +3122,6 @@ int main(int argc, char *argv[]) {
     LOG_INFO("Game started: {} ({})", emuenv->current_app_title, launch_request->app_path);
     // Never inherit the removed iOS FPS-hack setting from an older config.
     emuenv->display.fps_hack = false;
-    emuenv->display.fps_limit.store(60, std::memory_order_relaxed);
 
     const bool has_virtual_controller = vita3k_ios_attach_virtual_controller();
     if (has_virtual_controller) {

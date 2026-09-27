@@ -57,7 +57,7 @@ struct Vita3KIOSSettings {
     float resolution_multiplier = 1.0f;
     bool v_sync = true;
     bool shader_cache = true;
-    int fps_limit = 60;
+    int fps_limit = 60; // Host presentation only; 0 = Unlimited.
     bool cpu_opt = true;
     bool ngs_enable = true;
     bool async_pipeline_compilation = true;
@@ -143,6 +143,7 @@ void vita3k_ios_hide_library();
 std::optional<Vita3KIOSFrontendAction> vita3k_ios_take_frontend_action();
 void vita3k_ios_report_settings_result(const std::vector<std::string> &restart_required);
 int vita3k_ios_load_fps_limit();
+void vita3k_ios_save_fps_limit(int limit);
 
 // Returns true exactly once, on the first launch of a build that knows about
 // the Graphics > Double buffer switch. Versions 0.20.0-0.22.0 enabled memory

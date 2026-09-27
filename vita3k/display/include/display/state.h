@@ -19,6 +19,7 @@
 
 #include <kernel/callback.h>
 #include <mem/ptr.h>
+#include <util/presentation_limiter.h>
 #include <util/types.h>
 
 #include <algorithm>
@@ -84,25 +85,15 @@ struct DisplayState {
     // or run twice as fast (if they only rely on these function calls for their timings)
     bool fps_hack = false;
 
-    // Host presentation cap. Guest timing and the 60 Hz Vita vblank clock are
-    // left untouched; frames are only skipped when they arrive faster than
-    // this limit. A value of 60 (or greater) is effectively uncapped.
-    std::atomic<int> fps_limit{ 60 };
-    std::chrono::steady_clock::time_point last_present_time{};
+    // Host presentation cap: 0 = unlimited, 30 or 60. iOS installs its saved
+    // preference at launch; other frontends remain uncapped by default.
+    // Guest timing and the 60 Hz Vita vblank clock are unchanged.
+    std::atomic<int> fps_limit{ 0 };
+    util::PresentationLimiter presentation_limiter;
 
-    // Single gate for every present site (both the prediction fast path and
-    // the SetFrameBuf path must respect the cap). Caller holds
-    // display_info_mutex; on true the presentation timestamp is consumed.
+    // Caller holds display_info_mutex. Only consume a slot for a real request.
     bool presentation_due_now() {
-        const int limit = std::clamp(fps_limit.load(std::memory_order_relaxed), 15, 60);
-        const auto now = std::chrono::steady_clock::now();
-        if (limit >= 60
-            || last_present_time.time_since_epoch().count() == 0
-            || now - last_present_time >= std::chrono::microseconds(1000000 / limit)) {
-            last_present_time = now;
-            return true;
-        }
-        return false;
+        return presentation_limiter.due(fps_limit.load(std::memory_order_relaxed));
     }
 
     // should contain the list of sync objects / swapchain images (in the order they appear in the cycle)

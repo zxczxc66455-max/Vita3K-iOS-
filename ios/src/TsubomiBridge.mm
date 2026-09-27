@@ -5,6 +5,7 @@
 #include <vita3k_ios/VirtualController.h>
 #include <util/log.h>
 #include <util/ios_runtime_tuning.h>
+#include <util/presentation_limiter.h>
 
 // Same MacTypes collision the frontend hits: Apple's MacTypes.h declares
 // `typedef char *Ptr;`, which clashes with the emulator's global Ptr<T>
@@ -204,6 +205,7 @@ NSString *trophy_grade_name(int grade) {
         return nil;
     _resolutionMultiplier = core.resolution_multiplier;
     _vSync = core.v_sync;
+    _fpsLimit = util::normalize_fps_limit(core.fps_limit);
     _shaderCache = core.shader_cache;
     _cpuOptimizations = core.cpu_opt;
     _ngsAudio = core.ngs_enable;
@@ -234,7 +236,7 @@ NSString *trophy_grade_name(int grade) {
     core.resolution_multiplier = self.resolutionMultiplier;
     core.v_sync = self.vSync;
     core.shader_cache = self.shaderCache;
-    core.fps_limit = 60; // iOS always requests 60; the limiter UI was removed.
+    core.fps_limit = util::normalize_fps_limit(self.fpsLimit);
     core.cpu_opt = self.cpuOptimizations;
     core.ngs_enable = self.ngsAudio;
     core.async_pipeline_compilation = self.asyncPipelineCompilation;

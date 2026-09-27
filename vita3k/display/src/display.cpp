@@ -191,11 +191,9 @@ void update_prediction(EmuEnvState &emuenv, DisplayFrameInfo &frame) {
     std::lock_guard<std::mutex> lock(display.display_info_mutex);
     Address sync_object = display.current_sync_object;
 
-    const bool presentation_due = display.presentation_due_now();
-
     if (!display.predicting) {
         display.next_rendered_frame = frame;
-        if (presentation_due)
+        if (display.presentation_due_now())
             emuenv.renderer->should_display = true;
     }
 
@@ -211,10 +209,11 @@ void update_prediction(EmuEnvState &emuenv, DisplayFrameInfo &frame) {
         break;
     }
 
-    if (display.predicting && presentation_due) {
+    if (display.predicting) {
         LOG_TRACE("Mispredicted the next swapchain image");
         display.next_rendered_frame = frame;
-        emuenv.renderer->should_display = true;
+        if (display.presentation_due_now())
+            emuenv.renderer->should_display = true;
     }
 
     // let predict_next_image reset the cycle if necessary
@@ -251,8 +250,8 @@ void DisplayState::deinit() {
     last_setframe_vblank_count = 0;
 
     fps_hack = false;
-    fps_limit = 60;
-    last_present_time = {};
+    fps_limit = 0;
+    presentation_limiter = {};
     // pretty sure we set this on game boot
     fullscreen = false;
 }

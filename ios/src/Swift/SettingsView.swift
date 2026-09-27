@@ -445,12 +445,18 @@ struct SettingsView: View {
 
     private var videoSection: some View {
         Section {
+            Picker("FPS limit", selection: $model.fpsLimit) {
+                Text("30 FPS").tag(30)
+                Text("60 FPS").tag(60)
+                Text("Unlimited").tag(0)
+            }
+            .accessibilityHint("Limits host presentation without changing game speed.")
             Toggle("V-Sync", isOn: $model.vSync)
                 .accessibilityHint("Synchronizes presentation to the display when supported.")
         } header: {
             Text("Video")
         } footer: {
-            Text("V-Sync uses a display-synchronized presentation mode. When off, the renderer chooses an available low-latency mode; some devices still require synchronized presentation. Games keep their original timing. This does not turn a 30 FPS game into a 60 FPS game or guarantee 60 FPS.")
+            Text("30 and 60 cap host presentation. Unlimited removes this cap; V-Sync and the game can still limit FPS. Guest timing is unchanged, so this does not unlock a game’s native 30 FPS limit. Per-game changes apply on the next launch.")
         }
     }
 

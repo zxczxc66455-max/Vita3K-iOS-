@@ -8,8 +8,8 @@
 #include <threads/queue.h>
 static thread_local int pool_depth = 0;
 static int pools_drained = 0;
-util::AutoreleasePool::AutoreleasePool() { ++pool_depth; }
-util::AutoreleasePool::~AutoreleasePool() { assert(pool_depth == 1); --pool_depth; ++pools_drained; }
+util::AutoreleasePool::AutoreleasePool() : pool(nullptr) { ++pool_depth; }
+util::AutoreleasePool::~AutoreleasePool() { assert(pool == nullptr); assert(pool_depth == 1); --pool_depth; ++pools_drained; }
 struct CommandList { int id = 0; bool display = false; bool blocked = false; };
 struct MemState { bool signaled = false; };
 struct FeatureState {};

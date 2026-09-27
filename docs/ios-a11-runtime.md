@@ -198,3 +198,28 @@ failure paths with recording adapters. The Objective-C++ ownership/unwind test
 runs only on a Mac with Foundation. Visual correctness still needs captures of
 specific failing games on A11; this patch does not certify all graphics or IPA
 build success.
+
+## FPS limit
+
+Settings → Graphics & Display → Video offers 30 FPS, 60 FPS and Unlimited.
+60 is the default; Unlimited is stored as zero. These options cap host
+presentation requests without changing the Vita's 60 Hz vblank clock, CPU speed
+or native game frame-rate limit. V-Sync and device presentation modes can still
+limit Unlimited. The FPS overlay counts guest submissions, so it can differ
+from the presentation cap.
+
+Global values persist in `tsubomi.presentationFPS`; title overrides store
+`presentationFPS` in their existing settings dictionary. A missing title field
+inherits the global value. Invalid values fall back to 60. The selected limit
+is applied after runtime initialization and before guest execution, and global
+settings are restored after the session. Per-game changes apply at next launch.
+
+The limiter keeps its pacing phase across small scheduling delays and avoids
+catch-up bursts after a stall. A matching predicted frame no longer consumes a
+presentation slot without requesting a display; a capped misprediction still
+updates the latest image so it can be presented correctly later.
+
+The 7e1f1d91 iOS build linked successfully in GitHub run 36320348804. Its test gate
+failed on two Clang warnings in host fixtures. The pool adapters now exercise
+their stored pointer, and VMA/Vulkan headers are marked as external system
+includes in their fixture; `-Werror` remains enabled for our own test code.

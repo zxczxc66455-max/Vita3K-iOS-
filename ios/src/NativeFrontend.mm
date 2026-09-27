@@ -3,6 +3,7 @@
 
 #include <vita3k_ios/NativeFrontend.h>
 #include <vita3k_ios/VirtualController.h>
+#include <util/presentation_limiter.h>
 #include <util/ios_runtime_tuning.h>
 #include <sys/utsname.h>
 #include <util/render_diagnostics.h>
@@ -660,7 +661,8 @@ Vita3KIOSSettings game_settings_or(NSString *titleId, const Vita3KIOSSettings &f
         settings.v_sync = [stored[@"vsync"] boolValue];
     if (stored[@"shader_cache"])
         settings.shader_cache = [stored[@"shader_cache"] boolValue];
-    settings.fps_limit = 60;
+    if (stored[@"presentationFPS"])
+        settings.fps_limit = util::normalize_fps_limit([stored[@"presentationFPS"] longLongValue]);
     if (stored[@"cpuOpt"])
         settings.cpu_opt = [stored[@"cpuOpt"] boolValue];
     if (stored[@"ngs"])
@@ -684,6 +686,7 @@ void store_game_settings(NSString *titleId, const Vita3KIOSSettings &settings) {
     [NSUserDefaults.standardUserDefaults setObject:@{
         @"resolution": @(settings.resolution_multiplier),
         @"vsync": @(settings.v_sync),
+        @"presentationFPS": @(util::normalize_fps_limit(settings.fps_limit)),
         @"shader_cache": @(settings.shader_cache),
         @"cpuOpt": @(settings.cpu_opt),
         @"ngs": @(settings.ngs_enable),
@@ -1594,7 +1597,15 @@ std::optional<Vita3KIOSFrontendAction> vita3k_ios_take_frontend_action() {
 }
 
 int vita3k_ios_load_fps_limit() {
-    return 60;
+    NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
+    if (![defaults objectForKey:@"tsubomi.presentationFPS"])
+        return 60;
+    return util::normalize_fps_limit([defaults integerForKey:@"tsubomi.presentationFPS"]);
+}
+
+void vita3k_ios_save_fps_limit(int limit) {
+    [NSUserDefaults.standardUserDefaults setInteger:util::normalize_fps_limit(limit)
+                                           forKey:@"tsubomi.presentationFPS"];
 }
 
 bool vita3k_ios_consume_double_buffer_default_migration() {

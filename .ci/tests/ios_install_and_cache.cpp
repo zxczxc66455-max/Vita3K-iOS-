@@ -15,6 +15,7 @@
 #include <string>
 #include <tuple>
 #include <util/ios_runtime_tuning.h>
+#include <util/presentation_limiter.h>
 #include <vector>
 namespace fs {
 using namespace std::filesystem;
@@ -133,6 +134,7 @@ struct Config : SettingsFields {
 };
 struct Vita3KIOSSettings : SettingsFields {
     bool surface_sync = true, double_buffer = false;
+    int fps_limit = 60;
     int bind_cross = 0, bind_circle = 1, bind_square = 2, bind_triangle = 3;
 };
 struct EmuEnvState {
@@ -146,6 +148,8 @@ constexpr int SDL_GAMEPAD_BUTTON_SOUTH = 0, SDL_GAMEPAD_BUTTON_EAST = 1, SDL_GAM
 static int face_button_physical_for_slot(int slot) { return slot; }
 static std::string ios_memory_mapping_for(const Vita3KIOSSettings &s) { return s.double_buffer ? "double-buffer" : "disabled"; }
 static std::string restart_setting_name(int) { return "fixture"; }
+static int saved_fps_limit = 60;
+static void vita3k_ios_save_fps_limit(int value) { saved_fps_limit = util::normalize_fps_limit(value); }
 static void vita3k_ios_report_settings_result(const std::vector<std::string> &) {}
 namespace app {
 struct Result {
@@ -238,6 +242,16 @@ int main(int argc, char **argv) {
             assert(current.resolution_multiplier == settings.resolution_multiplier);
             assert(!current.fps_hack && env.display.fps_limit.load() == 60);
         }
+    }
+    for (int limit : {0, 30, 60, -1, 120}) {
+        settings.fps_limit = limit;
+        apply_native_settings(env, settings);
+        assert(saved_fps_limit == util::normalize_fps_limit(limit));
+        assert(env.display.fps_limit == saved_fps_limit);
+        settings.fps_limit = limit == 30 ? 0 : 30;
+        apply_game_session_settings(env, settings);
+        assert(env.display.fps_limit == settings.fps_limit);
+        assert(saved_fps_limit == util::normalize_fps_limit(limit)); // Per-game never persists globally.
     }
     Config cfg;
     cfg.hidden_setting = "saved";

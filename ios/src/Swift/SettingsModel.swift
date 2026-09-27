@@ -21,6 +21,7 @@ final class SettingsModel: ObservableObject {
 
     @Published var resolutionMultiplier: Float
     @Published var vSync: Bool
+    @Published var fpsLimit: Int
     @Published var shaderCache: Bool
     @Published var cpuOptimizations: Bool
     @Published var ngsAudio: Bool
@@ -63,6 +64,7 @@ final class SettingsModel: ObservableObject {
 
         resolutionMultiplier = settings.resolutionMultiplier
         vSync = settings.vSync
+        fpsLimit = settings.fpsLimit
         shaderCache = settings.shaderCache
         cpuOptimizations = settings.cpuOptimizations
         ngsAudio = settings.ngsAudio
@@ -105,6 +107,7 @@ final class SettingsModel: ObservableObject {
         let settings = original.copy() as! EmulatorSettings
         settings.resolutionMultiplier = resolutionMultiplier
         settings.vSync = vSync
+        settings.fpsLimit = fpsLimit
         settings.shaderCache = shaderCache
         settings.cpuOptimizations = cpuOptimizations
         settings.ngsAudio = ngsAudio

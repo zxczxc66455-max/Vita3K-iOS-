@@ -20,8 +20,8 @@ using namespace std::chrono_literals;
 // Track production worker pool scopes without an Objective-C runtime on Linux.
 static thread_local int pool_depth = 0;
 static std::atomic<int> pools_drained{0};
-util::AutoreleasePool::AutoreleasePool() { ++pool_depth; }
-util::AutoreleasePool::~AutoreleasePool() { assert(pool_depth == 1); --pool_depth; ++pools_drained; }
+util::AutoreleasePool::AutoreleasePool() : pool(nullptr) { ++pool_depth; }
+util::AutoreleasePool::~AutoreleasePool() { assert(pool == nullptr); assert(pool_depth == 1); --pool_depth; ++pools_drained; }
 #define LOG_ERROR(...) ((void)0)
 namespace ios_runtime {
 enum class ThreadRole { ShaderCompiler };

@@ -74,8 +74,8 @@ int main() {
             for ios in (False, True):
                 subprocess.run(shlex.split(os.environ.get("CXX", "c++")) + [
                     "-std=c++20", "-Wall", "-Wextra", "-Werror",
-                    "-I", str(vma / "include"), "-I", str(vma / "Vulkan-Headers/include"),
-                    "-I", str(vma / "VulkanMemoryAllocator/include"),
+                    "-isystem", str(vma / "include"), "-isystem", str(vma / "Vulkan-Headers/include"),
+                    "-isystem", str(vma / "VulkanMemoryAllocator/include"),
                 ] + (["-DVITA3K_PLATFORM_IOS"] if ios else []) + [str(source), "-o", str(binary)], check=True)
                 subprocess.run([str(binary)], check=True)
 

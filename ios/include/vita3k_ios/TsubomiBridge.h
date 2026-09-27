@@ -23,6 +23,8 @@ NS_SWIFT_NAME(EmulatorSettings)
 
 @property(nonatomic) float resolutionMultiplier;
 @property(nonatomic) BOOL vSync;
+/// Host presentation cap: 0 = Unlimited, 30 or 60.
+@property(nonatomic) NSInteger fpsLimit;
 @property(nonatomic) BOOL shaderCache;
 @property(nonatomic) BOOL cpuOptimizations;
 @property(nonatomic) BOOL ngsAudio;
