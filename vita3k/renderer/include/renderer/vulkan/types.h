@@ -31,7 +31,11 @@ namespace renderer::vulkan {
 struct VKState;
 struct VKRenderTarget;
 
+#ifdef VITA3K_PLATFORM_IOS
+constexpr int MAX_FRAMES_RENDERING = 2;
+#else
 constexpr int MAX_FRAMES_RENDERING = 3;
+#endif
 constexpr int NB_TEXTURE_STAGING_BUFFERS = 16;
 
 struct TextureStagingBuffer {

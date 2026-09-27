@@ -20,7 +20,7 @@ creation and through the instance layer settings when available.
 - iOS never enables `VK_EXT_external_memory_host`, even when advertised. Existing
   Disabled and DoubleBuffer mapping paths preserve owned buffers and copies.
 - The iOS swapchain requests two images, clamped to the surface's supported
-  minimum/maximum. The driver can return more; CPU frame slots remain unchanged.
+  minimum/maximum. The driver can return more; iOS Vulkan now uses two fence-protected frame slots.
 - Descriptor sets are allocated on demand in packs per frame slot (32 texture
   sets, 16 attachment sets). They are reused every frame. Idle tail packs are
   destroyed only after that slot's fences complete and its command pools reset.
@@ -82,3 +82,40 @@ Measure footprint and frame time; lower resource retention alone is not proof
 of better FPS or freedom from jetsam.
 
 Reference: [MoltenVK 1.4.2 configuration](https://github.com/KhronosGroup/MoltenVK/blob/v1.4.2/Docs/MoltenVK_Configuration_Parameters.md#mvk_config_use_metal_argument_buffers).
+
+## HLE/render follow-up
+
+The GXM display queue is capped at one queued entry plus one executing callback
+on iOS. Its existing condition-variable wait puts a producer to sleep when full.
+The consumer retains the queued entry until its GXM sync waits complete. The
+Vulkan backend separately reuses two frame slots only after waiting for their
+GPU fences. This bounds these queues, not arbitrary memory a game can allocate.
+`sceDisplaySetFrameBuf` coalesces into a latest-image snapshot; adding a wait
+inside it could block the very callback needed to drain the GXM queue.
+Initialization validates callback sizes without 32-bit multiplication overflow,
+and failed callback-data allocation returns an error before copying.
+
+Settings → Shader compilation → Prepare cached shaders in background is on by
+default and takes effect after restart. Program creation submits only the hash
+to one utility worker. The queue holds at most 32 active/pending hashes, suppresses
+duplicates and skips speculation when full. It prepares existing SPIR-V modules;
+it does not construct a complete PSO from an unpaired registered program. No
+guest program pointer crosses this queue. Shutdown discards pending warmups and
+joins the active load before destroying shader modules.
+
+Async pipeline jobs are also capped at 32 on iOS. Overflow compiles on the render
+thread, allowing existing command/display queue limits to apply backpressure.
+Completed handles and cache-save deadlines use atomic publication. Failed jobs
+clear their compiling sentinel and release guest references. Queue-allocation
+failure keeps references pinned through synchronous fallback. Guest shader
+release waits on a condition variable whose lifetime exceeds guest objects,
+replacing polling/yield loops. Unrelated shader loads do not hold the shared
+shader-map mutex across disk I/O or driver compilation.
+
+True guest/Metal zero-copy remains unimplemented. MoltenVK 1.4.2 lists both host
+and Metal external-memory extensions, but their existence is not proof that
+this guest arena can safely be imported on an A11 device. The current arena
+uses fixed guest addresses, page protection and page decommit; GPU imports would
+need allocator ownership, alignment, mapping, CPU/GPU visibility and deferred
+free handling tested together. `MTLStorageModeShared` alone does not replace that
+protocol. External host import therefore stays disabled in this patch.

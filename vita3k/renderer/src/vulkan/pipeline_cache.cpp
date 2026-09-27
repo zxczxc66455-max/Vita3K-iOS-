@@ -17,6 +17,7 @@
 
 #include <renderer/vulkan/pipeline_cache.h>
 #include <util/ios_thread_policy.h>
+#include <util/shader_lifetime.h>
 
 #include <renderer/vulkan/gxm_to_vulkan.h>
 #include <renderer/vulkan/state.h>
@@ -50,7 +51,7 @@ constexpr size_t record_pipeline_len = offsetof(GxmRecordState, vertex_streams);
 // structure containing everything needed to compile a pipeline
 struct CompileRequest {
     // iterator to the pipeline location
-    vk::Pipeline *pipeline;
+    std::atomic<vk::Pipeline> *pipeline;
 
     // this is everything we need to compile the shader on another thread (as the original data will change)
     SceGxmPrimitiveType type;
@@ -60,7 +61,15 @@ struct CompileRequest {
     shader::Hints hints;
 
     // the content of the record useful for the pipeline creation
-    alignas(8) uint8_t record_data[record_pipeline_len];
+    alignas(8) uint8_t record_data[record_pipeline_len]{};
+    bool pins_programs = false;
+
+    ~CompileRequest() {
+        if (pins_programs) {
+            util::finish_compilation(vertex_program_gxm->compile_threads_on);
+            util::finish_compilation(fragment_program_gxm->compile_threads_on);
+        }
+    }
 
     const GxmRecordState *get_record() {
         // note: this object is only half defined, but we are only looking at the part that's defined
@@ -257,6 +266,26 @@ void PipelineCache::init(bool support_rasterized_order_access) {
     LOG_INFO("iOS shader compiler workers: {}", nb_worker_threads);
 #endif
 
+#ifdef VITA3K_PLATFORM_IOS
+    if (ios_runtime::tuning.prewarm_shader_cache) {
+        try {
+            shader_warmup.start([this](const Sha256Hash &hash) {
+                ios_runtime::configure_thread(ios_runtime::ThreadRole::ShaderCompiler);
+                try {
+                    if (state.use_disk_shader_cache.load(std::memory_order_relaxed))
+                        precompile_shader(hash);
+                } catch (const std::exception &error) {
+                    LOG_WARN("Skipping shader cache warmup: {}", error.what());
+                } catch (...) {
+                    LOG_WARN("Skipping shader cache warmup after an unknown driver failure");
+                }
+            });
+        } catch (const std::exception &error) {
+            LOG_WARN("Shader cache warmup unavailable: {}", error.what());
+        }
+    }
+#endif
+
     if (use_async_compilation) {
         // we could not initialize the worker threads previously
         use_async_compilation = false;
@@ -423,12 +452,16 @@ void PipelineCache::save_pipeline_cache() {
 }
 
 void PipelineCache::cleanup() {
+#ifdef VITA3K_PLATFORM_IOS
+    // Cancel speculative work and join before destroying modules or the device.
+    shader_warmup.stop();
+#endif
     // stop threads
     if (use_async_compilation)
         set_async_compilation(false);
 
     for (auto &[hash, pipeline] : pipelines)
-        state.device.destroy(pipeline);
+        state.device.destroy(pipeline.load(std::memory_order_acquire));
     pipelines.clear();
 
     {
@@ -838,11 +871,16 @@ void PipelineCache::compiler_thread(MemState &mem) {
             // use this as an instruction to stop the thread
             break;
 
-        vk::Pipeline pipeline = compile_pipeline(request->type, request->render_pass, *request->vertex_program_gxm, *request->fragment_program_gxm, *request->get_record(), request->hints, mem);
-        *request->pipeline = pipeline;
-
-        request->vertex_program_gxm->compile_threads_on.fetch_sub(1, std::memory_order_release);
-        request->fragment_program_gxm->compile_threads_on.fetch_sub(1, std::memory_order_release);
+        vk::Pipeline pipeline;
+        try {
+            pipeline = compile_pipeline(request->type, request->render_pass, *request->vertex_program_gxm, *request->fragment_program_gxm, *request->get_record(), request->hints, mem);
+        } catch (const std::exception &error) {
+            LOG_ERROR("Asynchronous pipeline compilation failed: {}", error.what());
+        } catch (...) {
+            LOG_ERROR("Asynchronous pipeline compilation failed");
+        }
+        // A failed job publishes null so a later draw can retry synchronously.
+        request->pipeline->store(pipeline, std::memory_order_release);
 
         const auto time_s = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count();
         next_pipeline_cache_save = time_s + pipeline_cache_save_delay;
@@ -850,6 +888,7 @@ void PipelineCache::compiler_thread(MemState &mem) {
         state.shaders_count_compiled++;
 
         delete request;
+        pending_pipeline_compiles.fetch_sub(1, std::memory_order_relaxed);
     }
 }
 
@@ -1007,17 +1046,18 @@ vk::Pipeline PipelineCache::retrieve_pipeline(VKContext &context, SceGxmPrimitiv
 
     auto it = pipelines.find(key);
     if (it != pipelines.end()) {
-        if (it->second != nullptr) {
-            if (it->second == pipeline_compiling)
+        const auto published = it->second.load(std::memory_order_acquire);
+        if (published != nullptr) {
+            if (published == pipeline_compiling)
                 // pipeline is still compiling
                 return nullptr;
             else
-                return it->second;
+                return published;
         }
         already_in_cache = true;
     } else {
         // the pipeline hash was not in the cache;
-        it = pipelines.insert({ key, pipeline_compiling }).first;
+        it = pipelines.try_emplace(key, pipeline_compiling).first;
     }
 
     // get the correct renderpass here
@@ -1029,8 +1069,14 @@ vk::Pipeline PipelineCache::retrieve_pipeline(VKContext &context, SceGxmPrimitiv
     context.shader_hints.attributes = &vertex_program_gxm.attributes;
 
     // note: the flag can_use_deferred_compilation is not considered here because it causes way too many false positives
-    const bool compile_pipeline_async = !already_in_cache && consider_for_async && use_async_compilation;
+    const bool compile_pipeline_async = !already_in_cache && consider_for_async && use_async_compilation
+#ifdef VITA3K_PLATFORM_IOS
+        // A shader burst must not retain unlimited guest programs and requests.
+        && pending_pipeline_compiles.load(std::memory_order_relaxed) < 32
+#endif
+        ;
 
+    std::unique_ptr<CompileRequest> failed_enqueue;
     if (compile_pipeline_async) {
         render_diagnostics::add(render_diagnostics::PipelineQueued);
         // create the pipeline compile request
@@ -1049,13 +1095,28 @@ vk::Pipeline PipelineCache::retrieve_pipeline(VKContext &context, SceGxmPrimitiv
         // we must not delete these programs until the worker is done
         vertex_program_gxm.compile_threads_on.fetch_add(1, std::memory_order_relaxed);
         fragment_program_gxm.compile_threads_on.fetch_add(1, std::memory_order_relaxed);
+        request->pins_programs = true;
 
-        pipeline_compile_queue.enqueue(pipeline_compile_queue_token, request);
+        pending_pipeline_compiles.fetch_add(1, std::memory_order_relaxed);
+        if (pipeline_compile_queue.enqueue(pipeline_compile_queue_token, request))
+            return nullptr;
 
-        return nullptr;
-    } else {
+        // Keep guest programs pinned throughout the synchronous fallback,
+        // including exception unwinding. Releasing here could wake a deleter.
+        pending_pipeline_compiles.fetch_sub(1, std::memory_order_relaxed);
+        failed_enqueue.reset(request);
+    }
+    {
+        // No async capacity (or disabled): compile on the render thread. This
+        // applies backpressure through the bounded command/display queues.
         // can't wait, compile it right now
-        vk::Pipeline result = compile_pipeline(type, render_pass, vertex_program_gxm, fragment_program_gxm, record, context.shader_hints, mem);
+        vk::Pipeline result;
+        try {
+            result = compile_pipeline(type, render_pass, vertex_program_gxm, fragment_program_gxm, record, context.shader_hints, mem);
+        } catch (...) {
+            it->second.store(nullptr, std::memory_order_release);
+            throw;
+        }
 
         const auto time_s = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count();
         next_pipeline_cache_save = time_s + pipeline_cache_save_delay;
@@ -1069,16 +1130,44 @@ vk::Pipeline PipelineCache::retrieve_pipeline(VKContext &context, SceGxmPrimitiv
     }
 }
 
+void PipelineCache::enqueue_shader_warmup(const Sha256Hash &hash) {
+#ifdef VITA3K_PLATFORM_IOS
+    if (state.use_disk_shader_cache.load(std::memory_order_relaxed))
+        shader_warmup.try_enqueue(hash);
+#else
+    (void)hash;
+#endif
+}
+
 vk::ShaderModule PipelineCache::precompile_shader(const Sha256Hash &hash) {
-    // Startup precompilation runs before rendering. Use the same synchronization
-    // as runtime retrieval so no caller can observe an in-progress module.
     const vk::ShaderModule shader_compiling = std::bit_cast<vk::ShaderModule>(~0ULL);
-    std::unique_lock<std::mutex> lock(shaders_mutex);
-    auto *shader_module = &shaders.insert({ hash, nullptr }).first->second;
-    shaders_ready.wait(lock, [&] { return *shader_module != shader_compiling; });
-    if (!*shader_module)
-        *shader_module = load_shader_from_disk(hash);
-    return *shader_module;
+    vk::ShaderModule *slot;
+    {
+        std::unique_lock<std::mutex> lock(shaders_mutex);
+        slot = &shaders.insert({ hash, nullptr }).first->second;
+        shaders_ready.wait(lock, [&] { return *slot != shader_compiling; });
+        if (*slot)
+            return *slot;
+        *slot = shader_compiling;
+    }
+    vk::ShaderModule loaded;
+    try {
+        // Disk I/O and driver work must not hold the shared shader-map lock.
+        loaded = load_shader_from_disk(hash);
+    } catch (...) {
+        {
+            std::lock_guard<std::mutex> lock(shaders_mutex);
+            *slot = nullptr;
+        }
+        shaders_ready.notify_all();
+        throw;
+    }
+    {
+        std::lock_guard<std::mutex> lock(shaders_mutex);
+        *slot = loaded;
+    }
+    shaders_ready.notify_all();
+    return loaded;
 }
 
 vk::ShaderModule PipelineCache::load_shader_from_disk(const Sha256Hash &hash) {

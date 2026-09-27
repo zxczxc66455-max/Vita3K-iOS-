@@ -34,6 +34,7 @@ struct SettingsView: View {
     @State private var profileApplied = false
     @AppStorage("tsubomi.cpuBackend") private var cpuBackend = 0
     @AppStorage("tsubomi.guestMemoryMiB") private var guestMemoryMiB = 768
+    @AppStorage("tsubomi.prewarmShaderCache") private var prewarmShaderCache = true
     @AppStorage("tsubomi.precompileShaders") private var precompileShaders = false
     @AppStorage("tsubomi.jitCacheMiB") private var jitCacheMiB = 0
     @AppStorage("tsubomi.cpuExecutionThreads") private var cpuExecutionThreads = 0
@@ -299,6 +300,7 @@ struct SettingsView: View {
                         idleCacheSeconds = 45
                         metalArgumentBuffers = 1
                         precompileShaders = false
+                        prewarmShaderCache = true
                         profileApplied = true
                     }
                 } message: {
@@ -423,6 +425,8 @@ struct SettingsView: View {
                     ForEach(1...4, id: \.self) { value in Text("\(value)").tag(value) }
                 }
                 .disabled(!model.asyncPipelineCompilation)
+                Toggle("Prepare cached shaders in background", isOn: $prewarmShaderCache)
+                    .disabled(!model.shaderCache)
                 Toggle("Precompile cached shaders at launch", isOn: $precompileShaders)
                     .disabled(!model.shaderCache)
             }
@@ -432,6 +436,7 @@ struct SettingsView: View {
             settingsHelp {
                 Text("Shader disk cache reuses compiled shaders between launches. Async compilation can reduce pauses, but objects may be missing until their pipeline is ready. Turn it off when checking missing graphics.")
                 Text("Shader compiler workers run on the CPU and prepare graphics pipelines. They are separate from CPU JIT execution. Metal schedules 3D work on the GPU; this renderer cannot enable a chosen number of physical GPU cores.")
+                Text("Background preparation loads previously cached shader modules when games create programs. It uses a bounded queue and needs an app restart. First-time shaders and complete pipelines still need draw-time state.")
                 Text("Compiler thread count and precompilation require an app restart. More threads can increase CPU and memory use; precompilation needs disk caching and can lengthen startup.")
                 Text("Shader settings selected in the library apply on the next game launch.")
             }

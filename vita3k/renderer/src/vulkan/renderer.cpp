@@ -1298,10 +1298,11 @@ void VKState::swap_window() {
 
     // look once a frame if we need to save the pipeline cache
     const auto time_s = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count();
-    if (time_s >= pipeline_cache.next_pipeline_cache_save) {
+    auto save_deadline = pipeline_cache.next_pipeline_cache_save.load(std::memory_order_relaxed);
+    if (time_s >= save_deadline) {
         pipeline_cache.save_pipeline_cache();
-
-        pipeline_cache.next_pipeline_cache_save = std::numeric_limits<uint64_t>::max();
+        pipeline_cache.next_pipeline_cache_save.compare_exchange_strong(save_deadline,
+            std::numeric_limits<uint64_t>::max(), std::memory_order_relaxed);
     }
 }
 

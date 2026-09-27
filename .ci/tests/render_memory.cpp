@@ -9,7 +9,7 @@
 using namespace std::chrono_literals;
 #define LOG_ERROR(...) ((void)0)
 constexpr bool VK_TRUE = true;
-constexpr int MAX_FRAMES_RENDERING = 3;
+// INSERT_FRAME_COUNT
 static std::vector<int> events;
 namespace vk {
 enum class Result { eSuccess };
@@ -71,12 +71,12 @@ int main() {
         ios_runtime::tuning.trim_staging_buffers = enabled;
         VKContext context;
         for (unsigned frame = 1; frame <= 725; ++frame) {
-            context.state.frames[frame % 3].rendered_fences = {7};
+            context.state.frames[frame % MAX_FRAMES_RENDERING].rendered_fences = {7};
             events.clear();
             new_frame(context);
             int reset = 3;
 #ifdef VITA3K_PLATFORM_IOS
-            if (enabled && (frame / 3) % 120 == 0) reset = 4;
+            if (enabled && (frame / MAX_FRAMES_RENDERING) % 120 == 0) reset = 4;
 #endif
             assert(events == std::vector<int>({1, 2, reset, reset, 5}));
             assert(context.state.frame().rendered_fences.empty());
@@ -84,7 +84,7 @@ int main() {
         }
         context.state.features.enable_memory_mapping = true;
         context.last_frame_waited = context.frame_timestamp;
-        context.state.frames[726 % 3].rendered_fences = {9};
+        context.state.frames[726 % MAX_FRAMES_RENDERING].rendered_fences = {9};
         events.clear();
         new_frame(context);
         assert(events == std::vector<int>({0, 2, 3, 3, 5}));

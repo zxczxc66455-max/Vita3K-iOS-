@@ -44,7 +44,9 @@
 #include <renderer/types.h>
 #include <util/align.h>
 #include <util/bytes.h>
+#include <util/ios_runtime_tuning.h>
 #include <util/log.h>
+#include <util/shader_lifetime.h>
 
 #include <util/tracy.h>
 TRACY_MODULE_NAME(SceGxm);
@@ -926,7 +928,8 @@ static void display_entry_thread(EmuEnvState &emuenv) {
         // check if we're shutting down before calling run_guest_function to avoid deadlock
         if (emuenv.display.abort.load()) {
             LOG_DEBUG("Abort detected after pop, freeing callback data and exiting");
-            free(emuenv.mem, display_callback->data);
+            if (display_callback->data)
+                free(emuenv.mem, display_callback->data);
             break;
         }
 
@@ -943,7 +946,8 @@ static void display_entry_thread(EmuEnvState &emuenv) {
         if (old_sync != new_sync)
             renderer::subject_done(new_sync, display_callback->new_sync_timestamp + 1);
 
-        free(emuenv.mem, display_callback->data);
+        if (display_callback->data)
+            free(emuenv.mem, display_callback->data);
     }
 }
 
@@ -2243,9 +2247,14 @@ EXPORT(int, sceGxmDisplayQueueAddEntry, Ptr<SceGxmSyncObject> oldBuffer, Ptr<Sce
     if (!oldBuffer || !newBuffer)
         return RET_ERROR(SCE_GXM_ERROR_INVALID_POINTER);
 
-    const Address address = alloc(emuenv.mem, emuenv.gxm.params.displayQueueCallbackDataSize, __FUNCTION__);
-    const Ptr<void> ptr(address);
-    memcpy(ptr.get(emuenv.mem), callbackData.get(emuenv.mem), emuenv.gxm.params.displayQueueCallbackDataSize);
+    const auto callback_size = emuenv.gxm.params.displayQueueCallbackDataSize;
+    if (callback_size && !callbackData)
+        return RET_ERROR(SCE_GXM_ERROR_INVALID_POINTER);
+    const Address address = callback_size ? alloc(emuenv.mem, callback_size, __FUNCTION__) : 0;
+    if (callback_size && !address)
+        return RET_ERROR(SCE_GXM_ERROR_OUT_OF_MEMORY);
+    if (callback_size)
+        memcpy(Ptr<void>(address).get(emuenv.mem), callbackData.get(emuenv.mem), callback_size);
 
     DisplayFrameInfo *frame = predict_next_image(emuenv, newBuffer.address());
 
@@ -2851,15 +2860,23 @@ EXPORT(int, sceGxmInitialize, const SceGxmInitializeParams *params) {
         return RET_ERROR(SCE_GXM_ERROR_INVALID_VALUE);
     }
 
-    if ((params->displayQueueMaxPendingCount * params->displayQueueCallbackDataSize) > 0x200) {
+    // Widen before multiplying: both values are guest controlled.
+    if (static_cast<uint64_t>(params->displayQueueMaxPendingCount) * params->displayQueueCallbackDataSize > 0x200) {
         return RET_ERROR(SCE_GXM_ERROR_INVALID_VALUE);
     }
 
     emuenv.gxm.params = *params;
-    // hack, limit the number of frame rendering at the same time to at most 3
-    // also, the last frame won't be in the queue so decrease the count by 1
-    // the case where displayQueueMaxPendingCount is 1 handled in sceGxmDisplayQueueAddEntry
-    const uint32_t max_queue_size = std::max(std::min(params->displayQueueMaxPendingCount, 3U) - 1, 1U);
+    // The consumer keeps the head queued until its GXM syncs complete, then
+    // executes one callback outside the queue. iOS allows one queued + one
+    // active entry; push sleeps on a condition variable when that queue is full.
+    // Keep this out of sceDisplaySetFrameBuf: it also runs inside that callback.
+    const uint32_t max_queue_size = ios_runtime::display_queue_capacity(params->displayQueueMaxPendingCount,
+#ifdef VITA3K_PLATFORM_IOS
+        true
+#else
+        false
+#endif
+    );
     emuenv.gxm.display_queue.maxPendingCount_ = max_queue_size;
 
     const ThreadStatePtr main_thread = emuenv.kernel.get_thread(thread_id);
@@ -4691,8 +4708,7 @@ EXPORT(int, sceGxmShaderPatcherForceUnregisterProgram, SceGxmShaderPatcher *shad
         for (auto it = shaderPatcher->vertex_program_cache.begin(); it != shaderPatcher->vertex_program_cache.end();) {
             if (it->first.vertex_program.program == rp->program) {
                 SceGxmVertexProgram *vertex_program = it->second.get(emuenv.mem);
-                while (vertex_program->compile_threads_on.load(std::memory_order_acquire) > 0)
-                    std::this_thread::yield();
+                util::wait_for_compilation(vertex_program->compile_threads_on);
 
                 free_callbacked(emuenv, thread_id, shaderPatcher, it->second.address());
                 it = shaderPatcher->vertex_program_cache.erase(it);
@@ -4704,8 +4720,7 @@ EXPORT(int, sceGxmShaderPatcherForceUnregisterProgram, SceGxmShaderPatcher *shad
         for (auto it = shaderPatcher->fragment_program_cache.begin(); it != shaderPatcher->fragment_program_cache.end();) {
             if (it->first.fragment_program.program == rp->program) {
                 SceGxmFragmentProgram *frag_program = it->second.get(emuenv.mem);
-                while (frag_program->compile_threads_on.load(std::memory_order_acquire) > 0)
-                    std::this_thread::yield();
+                util::wait_for_compilation(frag_program->compile_threads_on);
 
                 free_callbacked(emuenv, thread_id, shaderPatcher, it->second.address());
                 it = shaderPatcher->fragment_program_cache.erase(it);
@@ -4803,8 +4818,7 @@ EXPORT(int, sceGxmShaderPatcherReleaseFragmentProgram, SceGxmShaderPatcher *shad
     SceGxmFragmentProgram *const fp = fragmentProgram.get(emuenv.mem);
     --fp->reference_count;
     if (fp->reference_count == 0) {
-        while (fp->compile_threads_on.load(std::memory_order_acquire) > 0)
-            std::this_thread::yield();
+        util::wait_for_compilation(fp->compile_threads_on);
 
         for (FragmentProgramCache::const_iterator it = shaderPatcher->fragment_program_cache.begin(); it != shaderPatcher->fragment_program_cache.end(); ++it) {
             if (it->second == fragmentProgram) {
@@ -4826,8 +4840,7 @@ EXPORT(int, sceGxmShaderPatcherReleaseVertexProgram, SceGxmShaderPatcher *shader
     SceGxmVertexProgram *const vp = vertexProgram.get(emuenv.mem);
     --vp->reference_count;
     if (vp->reference_count == 0) {
-        while (vp->compile_threads_on.load(std::memory_order_acquire) > 0)
-            std::this_thread::yield();
+        util::wait_for_compilation(vp->compile_threads_on);
 
         for (VertexProgramCache::const_iterator it = shaderPatcher->vertex_program_cache.begin(); it != shaderPatcher->vertex_program_cache.end(); ++it) {
             if (it->second == vertexProgram) {

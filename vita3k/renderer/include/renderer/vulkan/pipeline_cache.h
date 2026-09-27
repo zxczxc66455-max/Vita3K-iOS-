@@ -17,8 +17,10 @@
 
 #pragma once
 
+#include <atomic>
 #include <blockingconcurrentqueue.h>
 #include <util/containers.h>
+#include <util/shader_warmup_queue.h>
 #include <vkutil/vkutil.h>
 
 #include <array>
@@ -92,7 +94,12 @@ private:
     std::condition_variable shaders_ready;
     // because of multithreading, we want the pointers to remain stable
     unordered_map_stable<Sha256Hash, vk::ShaderModule> shaders;
-    unordered_map_stable<uint64_t, vk::Pipeline> pipelines;
+    // Render thread owns the map; workers publish only into stable atomic slots.
+    unordered_map_stable<uint64_t, std::atomic<vk::Pipeline>> pipelines;
+    std::atomic<uint32_t> pending_pipeline_compiles{ 0 };
+#ifdef VITA3K_PLATFORM_IOS
+    util::ShaderWarmupQueue shader_warmup;
+#endif
 
     vk::ShaderModule load_shader_from_disk(const Sha256Hash &hash);
     vk::PipelineShaderStageCreateInfo retrieve_shader(const SceGxmProgram *program, const Sha256Hash &hash, bool is_vertex, bool maskupdate, MemState &mem, const shader::Hints &hints, bool is_srgb = false);
@@ -110,7 +117,7 @@ private:
 
 public:
     // if not 0, next time the pipeline cache should be saved (in seconds since epoch)
-    uint64_t next_pipeline_cache_save = std::numeric_limits<uint64_t>::max();
+    std::atomic<uint64_t> next_pipeline_cache_save = std::numeric_limits<uint64_t>::max();
 
     // modified by the surface cache, estimates if it is safe to use async pipeline compilation
     // (i.e that it does not causes permanent graphical issues)
@@ -137,6 +144,7 @@ public:
     vk::Pipeline retrieve_pipeline(VKContext &context, SceGxmPrimitiveType &type, bool consider_for_async, MemState &mem);
 
     vk::ShaderModule precompile_shader(const Sha256Hash &hash);
+    void enqueue_shader_warmup(const Sha256Hash &hash);
 
     void set_async_compilation(bool enable);
 };

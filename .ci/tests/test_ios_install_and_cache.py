@@ -48,7 +48,7 @@ class IOSInstallAndCacheTests(unittest.TestCase):
         source = source.replace("// INSERT_ARCHIVE_WRITE", archive[start:archive.index("\nstd::string install_target", start)])
         pipeline = (root / "vita3k/renderer/src/vulkan/pipeline_cache.cpp").read_text()
         start = pipeline.index("    const int nb_logical_threads =")
-        source = source.replace("// INSERT_WORKER_POLICY", pipeline[start:pipeline.index("\n    if (use_async_compilation)", start)])
+        source = source.replace("// INSERT_WORKER_POLICY", pipeline[start:pipeline.index("\n#ifdef VITA3K_PLATFORM_IOS\n    if (ios_runtime::tuning.prewarm_shader_cache)", start)])
         main = (root / "ios/src/UpstreamMain.cpp").read_text()
         source = source.replace("// INSERT_SETTINGS", main[main.index("void apply_native_settings("):main.index("std::optional<AppLaunchRequest> choose_boot_title")])
         config = (root / "vita3k/config/src/config.cpp").read_text()

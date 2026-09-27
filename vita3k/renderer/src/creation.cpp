@@ -195,6 +195,10 @@ bool create(std::unique_ptr<FragmentProgram> &fp, State &state, const SceGxmProg
     // Try to hash this shader
     fp->hash = sha256(&program, program.size);
     gxp_ptr_map.emplace(fp->hash, &program);
+#ifdef VITA3K_PLATFORM_IOS
+    if (state.current_backend == Backend::Vulkan)
+        static_cast<vulkan::VKState &>(state).pipeline_cache.enqueue_shader_warmup(fp->hash);
+#endif
 
     fp->buffer_count = shader::usse::get_uniform_buffer_sizes(program, fp->uniform_buffer_sizes);
     layout_ssbo_offset_from_uniform_buffer_sizes(fp->uniform_buffer_sizes, fp->uniform_buffer_data_offsets, fp->max_total_uniform_buffer_storage);
@@ -222,6 +226,10 @@ bool create(std::unique_ptr<VertexProgram> &vp, State &state, const SceGxmProgra
     // Hash this shader
     vp->hash = sha256(&program, program.size);
     gxp_ptr_map.emplace(vp->hash, &program);
+#ifdef VITA3K_PLATFORM_IOS
+    if (state.current_backend == Backend::Vulkan)
+        static_cast<vulkan::VKState &>(state).pipeline_cache.enqueue_shader_warmup(vp->hash);
+#endif
 
     vp->buffer_count = shader::usse::get_uniform_buffer_sizes(program, vp->uniform_buffer_sizes);
     shader::usse::get_attribute_informations(program, vp->attribute_infos);

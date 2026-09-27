@@ -27,6 +27,7 @@ struct Tuning {
     int idle_cache_seconds = 45;
     bool a11_device = false;
     bool prefer_hle_avplayer = false;
+    bool prewarm_shader_cache = true;
 };
 inline Tuning tuning;
 
@@ -45,6 +46,13 @@ constexpr int idle_cache_seconds(int requested) {
 }
 constexpr bool cache_expired(uint64_t now, uint64_t last_used, int seconds) {
     return seconds > 0 && now >= last_used && now - last_used >= static_cast<uint64_t>(seconds);
+}
+// One entry may already be executing its display callback outside the queue.
+constexpr uint32_t display_queue_capacity(uint32_t requested, bool ios) {
+    const uint32_t total = requested < 1 ? 1 : requested;
+    const uint32_t cap = ios ? 2 : 3;
+    const uint32_t bounded = total < cap ? total : cap;
+    return bounded > 1 ? bounded - 1 : 1;
 }
 constexpr uint32_t swapchain_images(uint32_t minimum, uint32_t maximum) {
     const uint32_t preferred = minimum > 2 ? minimum : 2;

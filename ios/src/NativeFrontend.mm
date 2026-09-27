@@ -2050,6 +2050,8 @@ void vita3k_ios_load_runtime_preferences() {
         ios_runtime::tuning.jit_cache_mib = static_cast<int>([defaults integerForKey:@"tsubomi.jitCacheMiB"]);
         ios_runtime::tuning.cpu_execution_threads = static_cast<int>([defaults integerForKey:@"tsubomi.cpuExecutionThreads"]);
         ios_runtime::tuning.shader_workers = static_cast<int>([defaults integerForKey:@"tsubomi.shaderWorkers"]);
+        ios_runtime::tuning.prewarm_shader_cache = [defaults objectForKey:@"tsubomi.prewarmShaderCache"] == nil
+            || [defaults boolForKey:@"tsubomi.prewarmShaderCache"];
         ios_runtime::tuning.prefer_hle_avplayer = [defaults boolForKey:@"tsubomi.preferHLEAvPlayer"];
         ios_runtime::tuning.metal_hud_requested = [defaults boolForKey:@"MetalHUDForceEnabled"];
         // Apple's documented environment route must be set before renderer

@@ -188,6 +188,33 @@ int main() {
         assert(waiter.get());
         assert(cache.loads == 2 && cache.state.device.creates == 1);
     }
+    // Background warmup must not serialize an unrelated runtime shader's I/O.
+    {
+        PipelineCache cache;
+        cache.disk_hit = true;
+        auto warmup = std::async(std::launch::async, [&] { return cache.precompile_shader(first); });
+        assert(cache.entered.get_future().wait_for(3s) == std::future_status::ready);
+        auto draw = std::async(std::launch::async, [&] {
+            return cache.retrieve_shader(&program, second, true, false, mem, hints).module;
+        });
+        assert(draw.wait_for(3s) == std::future_status::ready && draw.get());
+        cache.release.set_value();
+        assert(warmup.get());
+    }
+    // A failed speculative load releases the claim and lets a draw retry.
+    {
+        PipelineCache cache;
+        cache.fail_first = true;
+        auto warmup = std::async(std::launch::async, [&] { return cache.precompile_shader(first); });
+        assert(cache.entered.get_future().wait_for(3s) == std::future_status::ready);
+        auto draw = std::async(std::launch::async, [&] {
+            return cache.retrieve_shader(&program, first, true, false, mem, hints).module;
+        });
+        await_waiters(cache, 1);
+        cache.release.set_value();
+        try { warmup.get(); assert(false); } catch (const std::runtime_error &) {}
+        assert(draw.wait_for(3s) == std::future_status::ready && draw.get());
+    }
     // A startup disk miss must leave the entry available for runtime generation.
     {
         PipelineCache cache;
