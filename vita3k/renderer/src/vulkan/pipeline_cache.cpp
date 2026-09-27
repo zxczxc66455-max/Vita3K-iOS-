@@ -16,6 +16,7 @@
 // 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 
 #include <renderer/vulkan/pipeline_cache.h>
+#include <util/autorelease_pool.h>
 #include <util/ios_thread_policy.h>
 #include <util/shader_lifetime.h>
 
@@ -270,6 +271,7 @@ void PipelineCache::init(bool support_rasterized_order_access) {
     if (ios_runtime::tuning.prewarm_shader_cache) {
         try {
             shader_warmup.start([this](const Sha256Hash &hash) {
+                [[maybe_unused]] const util::AutoreleasePool warmup_pool;
                 ios_runtime::configure_thread(ios_runtime::ThreadRole::ShaderCompiler);
                 try {
                     if (state.use_disk_shader_cache.load(std::memory_order_relaxed))
@@ -871,6 +873,7 @@ void PipelineCache::compiler_thread(MemState &mem) {
             // use this as an instruction to stop the thread
             break;
 
+        [[maybe_unused]] const util::AutoreleasePool compile_pool;
         vk::Pipeline pipeline;
         try {
             pipeline = compile_pipeline(request->type, request->render_pass, *request->vertex_program_gxm, *request->fragment_program_gxm, *request->get_record(), request->hints, mem);

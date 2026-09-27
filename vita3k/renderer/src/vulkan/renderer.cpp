@@ -24,6 +24,7 @@
 #include <renderer/types.h>
 #include <renderer/vulkan/functions.h>
 #include <renderer/vulkan/state.h>
+#include <util/autorelease_pool.h>
 
 #include <config/state.h>
 #include <config/version.h>
@@ -374,6 +375,7 @@ bool VKState::init() {
 }
 
 bool VKState::create(std::unique_ptr<renderer::State> &state, const Config &config) {
+    [[maybe_unused]] const util::AutoreleasePool lifecycle_pool;
 #ifdef __ANDROID__
     const bool custom_driver_requested = !config.current_config.custom_driver_name.empty();
 #endif
@@ -473,22 +475,26 @@ bool VKState::create(std::unique_ptr<renderer::State> &state, const Config &conf
         }
 
 #ifdef __APPLE__
-        const VkBool32 full_image_swizzle = VK_TRUE;
+        // MoltenVK 1.4.2 handles full image-view swizzle automatically;
+        // MVK_CONFIG_FULL_IMAGE_VIEW_SWIZZLE is obsolete and ignored.
         const VkBool32 resume_lost_device = VK_TRUE;
 #ifndef NDEBUG
         const VkBool32 debug = VK_TRUE;
         const int32_t log_level = 4;
 #endif
 #ifdef VITA3K_PLATFORM_IOS
+        const VkBool32 synchronous_submits = VK_TRUE;
         const VkBool32 use_argument_buffers = ios_runtime::tuning.metal_argument_buffers ? VK_TRUE : VK_FALSE;
 #endif
         vk::LayerSettingEXT layer_settings[] = {
 #ifdef VITA3K_PLATFORM_IOS
+            // Encode on the submitting thread, inside its autorelease scope.
+            // This does not wait for GPU completion; fences still own lifetime.
+            { kMVKMoltenVKDriverLayerName, "MVK_CONFIG_SYNCHRONOUS_QUEUE_SUBMITS", vk::LayerSettingTypeEXT::eBool32, 1,
+                &synchronous_submits },
             { kMVKMoltenVKDriverLayerName, "MVK_CONFIG_USE_METAL_ARGUMENT_BUFFERS", vk::LayerSettingTypeEXT::eBool32, 1,
                 &use_argument_buffers },
 #endif
-            { kMVKMoltenVKDriverLayerName, "MVK_CONFIG_FULL_IMAGE_VIEW_SWIZZLE", vk::LayerSettingTypeEXT::eBool32, 1,
-                &full_image_swizzle },
             { kMVKMoltenVKDriverLayerName, "MVK_CONFIG_RESUME_LOST_DEVICE", vk::LayerSettingTypeEXT::eBool32, 1,
                 &resume_lost_device },
 #ifndef NDEBUG
@@ -873,10 +879,18 @@ bool VKState::create(std::unique_ptr<renderer::State> &state, const Config &conf
         };
 
         vma::AllocatorCreateInfo allocator_info = {
-            // everything vma-related is done on one thread, no need for thread safety
+#ifdef VITA3K_PLATFORM_IOS
+            // HLE mappings and renderer work must not assume one allocator caller.
+            .flags = {},
+#else
             .flags = vma::AllocatorCreateFlagBits::eExternallySynchronized,
+#endif
             .physicalDevice = physical_device,
             .device = device,
+#ifdef VITA3K_PLATFORM_IOS
+            // Preferred suballocation block size, not an allocation/heap ceiling.
+            .preferredLargeHeapBlockSize = MiB(8),
+#endif
             .pVulkanFunctions = &vulkan_functions,
             .instance = instance,
             .vulkanApiVersion = VK_API_VERSION_1_0,
@@ -956,6 +970,7 @@ bool VKState::create(std::unique_ptr<renderer::State> &state, const Config &conf
 }
 
 void VKState::late_init(const Config &cfg, const std::string_view game_id, MemState &mem) {
+    [[maybe_unused]] const util::AutoreleasePool lifecycle_pool;
     this->mem = &mem;
 
     bool use_high_accuracy = cfg.current_config.high_accuracy;
@@ -1056,6 +1071,7 @@ void VKState::late_init(const Config &cfg, const std::string_view game_id, MemSt
 }
 
 void VKState::cleanup() {
+    [[maybe_unused]] const util::AutoreleasePool lifecycle_pool;
     const auto release_descriptor_sets = [](FrameDescriptor &descriptor) {
         std::vector<vk::DescriptorSet>().swap(descriptor.sets);
         descriptor.descriptors_idx = 0;

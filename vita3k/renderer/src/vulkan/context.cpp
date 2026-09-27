@@ -16,6 +16,7 @@
 // 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 
 #include <renderer/vulkan/types.h>
+#include <util/autorelease_pool.h>
 
 #include <renderer/vulkan/functions.h>
 #include <renderer/vulkan/gxm_to_vulkan.h>
@@ -65,6 +66,7 @@ void VKContext::wait_thread_function(const MemState &mem) {
         if (!wait_request)
             break;
 
+        [[maybe_unused]] const util::AutoreleasePool request_pool;
         std::visit(overloaded{
                        [&](FenceWaitRequest &request) {
                            fences.push_back(request.fence);

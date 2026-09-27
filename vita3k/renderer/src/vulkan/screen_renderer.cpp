@@ -209,9 +209,15 @@ bool ScreenRenderer::setup() {
     } else if (support_d24u8) {
         state.deep_stencil_use = vk::Format::eD24UnormS8Uint;
     } else {
+#ifdef VITA3K_PLATFORM_IOS
+        // GXM pipelines use stencil. A depth-only fallback silently loses masks.
+        LOG_ERROR("No supported depth/stencil attachment format on this iOS device");
+        return false;
+#else
         LOG_WARN_ONCE("Your device doesn't support standard deep stencil ");
         // vk::Format::eD16UnormS8Uint didn't support in Android
         state.deep_stencil_use = vk::Format::eD16Unorm;
+#endif
     }
 
     create_render_pass();

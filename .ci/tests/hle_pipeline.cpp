@@ -1,5 +1,6 @@
 #define VITA3K_PLATFORM_IOS
 #include <util/shader_lifetime.h>
+#include <util/autorelease_pool.h>
 #include <array>
 #include <atomic>
 #include <bit>
@@ -16,6 +17,11 @@
 #include <thread>
 #include <vector>
 using namespace std::chrono_literals;
+// Track production worker pool scopes without an Objective-C runtime on Linux.
+static thread_local int pool_depth = 0;
+static std::atomic<int> pools_drained{0};
+util::AutoreleasePool::AutoreleasePool() { ++pool_depth; }
+util::AutoreleasePool::~AutoreleasePool() { assert(pool_depth == 1); --pool_depth; ++pools_drained; }
 #define LOG_ERROR(...) ((void)0)
 namespace ios_runtime {
 enum class ThreadRole { ShaderCompiler };
@@ -143,6 +149,7 @@ int main() {
     util::wait_for_compilation(fragment.compile_threads_on);
     cache.pipeline_compile_queue.enqueue(0, nullptr);
     worker.join();
+    assert(pools_drained == 32);
     assert(cache.pending_pipeline_compiles == 0 && cache.compiles == 33);
     for (uint64_t i = 1; i <= 33; ++i) {
         context.record.key = i;
@@ -164,6 +171,7 @@ int main() {
     util::wait_for_compilation(fragment.compile_threads_on);
     cache.pipeline_compile_queue.enqueue(0, nullptr);
     failing_worker.join();
+    assert(pools_drained == 33);
     assert(cache.pending_pipeline_compiles == 0 && cache.pipelines.at(35).load() == nullptr);
     cache.fail_compile = false;
     assert(cache.retrieve_pipeline(context, type, true, mem) == vk::Pipeline(1035));

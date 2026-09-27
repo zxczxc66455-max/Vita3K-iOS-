@@ -20,6 +20,7 @@
 #include <renderer/functions.h>
 #include <renderer/state.h>
 #include <renderer/types.h>
+#include <util/autorelease_pool.h>
 #include <util/ios_thread_policy.h>
 
 #include <renderer/vulkan/types.h>
@@ -161,6 +162,8 @@ void process_batches(renderer::State &state, const FeatureState &features, MemSt
             continue;
         }
 
+        // Drain each ready GXM list, including long frames with many lists.
+        [[maybe_unused]] const util::AutoreleasePool batch_pool;
         process_batch(state, features, mem, config, command_list);
         state.batches_processed.fetch_add(1, std::memory_order_relaxed);
     }
@@ -172,6 +175,7 @@ void reset_command_list(CommandList &command_list) {
 }
 
 static void render_loop(renderer::State &state, DisplayState &display, GxmState &gxm, MemState &mem, Config &config) {
+    [[maybe_unused]] const util::AutoreleasePool thread_pool;
     ios_runtime::configure_thread(ios_runtime::ThreadRole::Render);
     if (state.precompile_requested) {
         auto progress_overlay = state.overlay_manager
@@ -188,6 +192,7 @@ static void render_loop(renderer::State &state, DisplayState &display, GxmState 
         state.precompile_total = total;
 
         for (int i = 0; i < total && !state.render_abort.load(std::memory_order_relaxed); ++i) {
+            [[maybe_unused]] const util::AutoreleasePool shader_pool;
             if (!state.set_current())
                 break;
 
@@ -234,6 +239,7 @@ static void render_loop(renderer::State &state, DisplayState &display, GxmState 
         }
     }
     while (!state.render_abort.load(std::memory_order_relaxed)) {
+        [[maybe_unused]] const util::AutoreleasePool frame_pool;
 #ifdef TRACY_ENABLE
         ZoneScopedN("Game rendering");
 #endif

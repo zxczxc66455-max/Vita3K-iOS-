@@ -119,3 +119,82 @@ uses fixed guest addresses, page protection and page decommit; GPU imports would
 need allocator ownership, alignment, mapping, CPU/GPU visibility and deferred
 free handling tested together. `MTLStorageModeShared` alone does not replace that
 protocol. External host import therefore stays disabled in this patch.
+
+## Metal temporary ownership and allocator policy
+
+The C++ render thread owns an iOS autorelease pool, with nested pools per frame,
+ready GXM command list and startup shader. Background pipeline compiles, cached
+shader warmups and GPU wait/callback requests each get their own pool. Vulkan
+creation, late initialization and teardown also have local scopes. A small
+Objective-C++ utility implements this using `NSAutoreleasePool`; only that file
+uses manual reference counting. Pools cannot be copied/moved and drain on the
+creating thread, including C++ exception unwinding. The existing frontend
+`@autoreleasepool` scopes continue to cover its event loops.
+
+Draining a pool releases temporary Objective-C ownership, not every Metal
+object. Strongly owned or in-flight resources must remain alive. No guest RAM
+pointer is bridged into a Metal object. `__bridge` is appropriate only for a
+borrowed Objective-C pointer whose owner outlives the use; it cannot make an
+asynchronous GPU use safe on its own. Retained bridging is an ownership transfer
+that requires a balanced release, not inherently a leak.
+
+On iOS VMA now prefers 8 MiB large-heap blocks (the pinned VMA default is 256 MiB).
+This is a suballocation preference, not a maximum allocation or total heap cap;
+large resources can still need larger/dedicated allocations. Internal VMA
+synchronization remains enabled on iOS because an HLE queue lock does not prove
+exclusive access to every allocator operation. No arbitrary 1.2 GB process cap
+is claimed: heap limits exclude guest RAM, Metal driver allocations, JIT and UI,
+and allocation failure would need coordinated recovery before enforcing one.
+
+Descriptor sets remain reusable per fence-protected frame slot. They are not
+reset while command buffers reference them. Texture retirement retains the
+existing idle-time policy and GPU destruction delay; clearing after three frames
+would both discard useful cache entries and require the same fence protocol.
+
+Dynarmic already allocates a fixed code region per JIT instance. On a 3 GB device
+the automatic budget is 8 MiB per guest thread; selectable budgets are smaller
+than 128 MiB. The pinned ARM64 backend calls `ClearCache()` and rewinds the code
+offset when full; it does not mmap another region for each recompile. The iOS
+patch also clears block-range metadata. This is not a global 128 MiB limit across
+all guest threads, nor an LRU block-eviction implementation. Changing linked JIT
+block eviction needs invalidation/relink correctness work, not a raw ring buffer.
+
+## MoltenVK graphics compatibility audit
+
+On 2026-09-27 the upstream latest release is still
+[MoltenVK 1.4.2](https://github.com/KhronosGroup/MoltenVK/releases/tag/v1.4.2),
+which the iOS workflow already pins with its archive SHA-256. Its release includes
+SPIRV-Cross updates and fixes for color transfer channel corruption and primitive
+restart state. No unversioned dependency update or custom binary is substituted.
+
+Audited behavior in the pinned source:
+
+- [Pixel format mapping](https://github.com/KhronosGroup/MoltenVK/blob/v1.4.2/MoltenVK/MoltenVK/GPUObjects/MVKPixelFormats.mm)
+  already provides D32Float+Stencil8 as the D24+Stencil8 substitute. Vita3K prefers
+  supported Vulkan D32Float+Stencil8. On iOS it now fails initialization if neither
+  stencil-capable format is supported, instead of silently losing stencil via D16.
+- [Pipeline conversion](https://github.com/KhronosGroup/MoltenVK/blob/v1.4.2/MoltenVK/MoltenVK/GPUObjects/MVKPipeline.mm)
+  chooses MSL version from device features and enables point size for point
+  rendering. Hardcoding MSL 2.1 or enabling point-size output for every topology
+  would bypass this logic.
+- [Image views](https://github.com/KhronosGroup/MoltenVK/blob/v1.4.2/MoltenVK/MoltenVK/GPUObjects/MVKImage.mm)
+  already map component swizzles and select native versus shader swizzling.
+  `fullImageViewSwizzle` is obsolete/ignored in 1.4.2; its redundant layer setting
+  has been removed from Vita3K.
+- [Queue submission configuration](https://github.com/KhronosGroup/MoltenVK/blob/v1.4.2/Docs/MoltenVK_Configuration_Parameters.md#mvk_config_synchronous_queue_submits)
+  uses `true` to encode on the submitting CPU thread, not to wait for GPU
+  completion. iOS now sets this explicitly through both startup environment and
+  instance layer settings, keeping encoding within the caller's pool scope.
+  Fences and semaphores continue to govern GPU completion.
+
+No `dynamicLines` configuration field is added: it is not an MVKConfiguration
+member. Vulkan dynamic state must be supported, enabled and wired into pipeline
+creation. Depth clipping and depth clamping are distinct controls; advertising
+an extension or flipping Y again cannot generally fix missing geometry.
+
+Portable tests compile the actual allocator settings against the pinned VMA and
+Vulkan headers and exercise depth fallback, batch/worker pool boundaries, and
+failure paths with recording adapters. The Objective-C++ ownership/unwind test
+runs only on a Mac with Foundation. Visual correctness still needs captures of
+specific failing games on A11; this patch does not certify all graphics or IPA
+build success.

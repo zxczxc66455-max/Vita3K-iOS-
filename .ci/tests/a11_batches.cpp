@@ -1,9 +1,15 @@
+#define VITA3K_PLATFORM_IOS
+#include <util/autorelease_pool.h>
 #include <atomic>
 #include <cassert>
 #include <chrono>
 #include <thread>
 #include <vector>
 #include <threads/queue.h>
+static thread_local int pool_depth = 0;
+static int pools_drained = 0;
+util::AutoreleasePool::AutoreleasePool() { ++pool_depth; }
+util::AutoreleasePool::~AutoreleasePool() { assert(pool_depth == 1); --pool_depth; ++pools_drained; }
 struct CommandList { int id = 0; bool display = false; bool blocked = false; };
 struct MemState { bool signaled = false; };
 struct FeatureState {};
@@ -29,6 +35,7 @@ static renderer::SyncWaitResult wait_cmd(MemState &mem, CommandList &) {
     return renderer::SyncWaitResult::Ready;
 }
 static void process_batch(renderer::State &state, const FeatureState &, MemState &, Config &, CommandList &list) {
+    assert(pool_depth == 1);
     state.processed.push_back(list.id);
     state.should_display = list.display;
 }
@@ -83,4 +90,5 @@ int main() {
     state.command_buffer_queue.push({4, false, true});
     process_batches(state, features, mem, config, 100);
     assert(state.command_buffer_queue.size() == 1 && state.batches_processed == 3);
+    assert(pool_depth == 0 && pools_drained == 3);
 }

@@ -2044,6 +2044,8 @@ void vita3k_ios_load_runtime_preferences() {
         ios_runtime::tuning.idle_cache_seconds = [defaults objectForKey:@"tsubomi.idleCacheSeconds"] == nil
             ? 45 : ios_runtime::idle_cache_seconds(static_cast<int>([defaults integerForKey:@"tsubomi.idleCacheSeconds"]));
         // Configure before the Vulkan instance, including drivers without layer settings.
+        // Match the renderer layer setting when VK_EXT_layer_settings is absent.
+        setenv("MVK_CONFIG_SYNCHRONOUS_QUEUE_SUBMITS", "1", 1);
         setenv("MVK_CONFIG_USE_METAL_ARGUMENT_BUFFERS", ios_runtime::tuning.metal_argument_buffers ? "1" : "0", 1);
         ios_runtime::tuning.cpu_backend = ios_runtime::cpu_backend(static_cast<int>([defaults integerForKey:@"tsubomi.cpuBackend"]));
         ios_runtime::tuning.guest_memory_mib = ios_runtime::guest_memory_mib(static_cast<int>([defaults integerForKey:@"tsubomi.guestMemoryMiB"]));
