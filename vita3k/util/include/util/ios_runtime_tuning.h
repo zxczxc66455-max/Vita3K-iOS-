@@ -2,6 +2,9 @@
 // Copyright (C) 2026 Vita3K team
 #pragma once
 
+#include <cstdint>
+#include <string_view>
+
 namespace ios_runtime {
 // Loaded once by the iOS frontend before renderer/JIT initialization. Settings
 // edits affect the next process: existing JIT pool regions must keep their size.
@@ -19,8 +22,34 @@ struct Tuning {
     bool precompile_shaders = false;
     bool conservative_culling = false;
     bool metal_hud_requested = false;
+    bool metal_argument_buffers = true;
+    // Zero disables idle cache retirement. Read once at startup.
+    int idle_cache_seconds = 45;
+    bool a11_device = false;
+    bool prefer_hle_avplayer = false;
 };
 inline Tuning tuning;
+
+constexpr bool is_a11(std::string_view machine) {
+    return machine == "iPhone10,1" || machine == "iPhone10,2"
+        || machine == "iPhone10,3" || machine == "iPhone10,4"
+        || machine == "iPhone10,5" || machine == "iPhone10,6";
+}
+// 0 = automatic, 1 = legacy bindings, 2 = argument buffers.
+constexpr bool metal_argument_buffers(int requested, bool a11) {
+    return requested == 1 ? false : requested == 2 ? true
+                                                   : !a11;
+}
+constexpr int idle_cache_seconds(int requested) {
+    return requested == 0 || requested == 30 || requested == 45 || requested == 60 ? requested : 45;
+}
+constexpr bool cache_expired(uint64_t now, uint64_t last_used, int seconds) {
+    return seconds > 0 && now >= last_used && now - last_used >= static_cast<uint64_t>(seconds);
+}
+constexpr uint32_t swapchain_images(uint32_t minimum, uint32_t maximum) {
+    const uint32_t preferred = minimum > 2 ? minimum : 2;
+    return maximum != 0 && preferred > maximum ? maximum : preferred;
+}
 
 constexpr CPUBackend cpu_backend(int requested) {
     return requested == 1 ? CPUBackend::IRInterpreter : CPUBackend::Jit;

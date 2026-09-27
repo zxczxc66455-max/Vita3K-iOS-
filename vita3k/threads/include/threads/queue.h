@@ -28,6 +28,31 @@
 template <typename T>
 class Queue {
 public:
+    enum class PopResult { Empty,
+        Blocked,
+        Ready,
+        Aborted };
+
+    // Atomically inspect and remove a ready head. A blocked list remains queued
+    // so sync ordering and wait_empty() retain their original meaning. The
+    // predicate must be nonblocking and must not call back into this queue.
+    template <typename Predicate>
+    PopResult pop_if(T &item, Predicate ready, std::chrono::microseconds timeout) {
+        std::unique_lock<std::mutex> lock(mutex_);
+        condempty_.wait_for(lock, timeout, [&] { return aborted || !queue_.empty(); });
+        if (aborted)
+            return PopResult::Aborted;
+        if (queue_.empty())
+            return PopResult::Empty;
+        item = queue_.front();
+        if (!ready(item))
+            return PopResult::Blocked;
+        queue_.pop();
+        lock.unlock();
+        cond_.notify_all();
+        return PopResult::Ready;
+    }
+
     // default value: unlimited
     unsigned int maxPendingCount_ = -1;
 

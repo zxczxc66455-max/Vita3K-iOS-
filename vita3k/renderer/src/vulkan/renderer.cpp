@@ -42,6 +42,7 @@
 
 #ifdef __APPLE__
 #include <MoltenVK/mvk_vulkan.h>
+#include <util/ios_runtime_tuning.h>
 #endif
 
 #if defined(VITA3K_PLATFORM_IOS)
@@ -478,7 +479,14 @@ bool VKState::create(std::unique_ptr<renderer::State> &state, const Config &conf
         const VkBool32 debug = VK_TRUE;
         const int32_t log_level = 4;
 #endif
+#ifdef VITA3K_PLATFORM_IOS
+        const VkBool32 use_argument_buffers = ios_runtime::tuning.metal_argument_buffers ? VK_TRUE : VK_FALSE;
+#endif
         vk::LayerSettingEXT layer_settings[] = {
+#ifdef VITA3K_PLATFORM_IOS
+            { kMVKMoltenVKDriverLayerName, "MVK_CONFIG_USE_METAL_ARGUMENT_BUFFERS", vk::LayerSettingTypeEXT::eBool32, 1,
+                &use_argument_buffers },
+#endif
             { kMVKMoltenVKDriverLayerName, "MVK_CONFIG_FULL_IMAGE_VIEW_SWIZZLE", vk::LayerSettingTypeEXT::eBool32, 1,
                 &full_image_swizzle },
             { kMVKMoltenVKDriverLayerName, "MVK_CONFIG_RESUME_LOST_DEVICE", vk::LayerSettingTypeEXT::eBool32, 1,
@@ -645,8 +653,10 @@ bool VKState::create(std::unique_ptr<renderer::State> &state, const Config &conf
             { vk::KHRImageFormatListExtensionName, &surface_cache.support_image_format_specifier },
             { vk::KHRExternalMemoryExtensionName, &temp_bool },
             { vk::KHRDeviceGroupExtensionName, &temp_bool },
-            // can host memory directly be used for gxm memory
+#ifndef VITA3K_PLATFORM_IOS
+            // iOS always owns/copies buffers; never enable host-pointer imports.
             { vk::EXTExternalMemoryHostExtensionName, &support_external_memory },
+#endif
             // also needed for reading mapped memory in the shader
             { vk::KHRBufferDeviceAddressExtensionName, &support_buffer_device_address },
             // needed for uniform uvec2 arrays not to take twice the size
@@ -1059,6 +1069,15 @@ void VKState::cleanup() {
 
     for (int i = 0; i < MAX_FRAMES_RENDERING; i++) {
         frames[i].rendered_fences.clear();
+#ifdef VITA3K_PLATFORM_IOS
+        // Device is idle at teardown; retire every pack including recently used ones.
+        for (int layout = 0; layout < 16; ++layout) {
+            retire_frame_descriptors(device, frames[i].vert_descriptors[layout], UINT64_MAX, 1);
+            retire_frame_descriptors(device, frames[i].frag_descriptors[layout], UINT64_MAX, 1);
+        }
+        retire_frame_descriptors(device, frames[i].color_descriptor, UINT64_MAX, 1);
+#endif
+
         for (auto &descriptor : frames[i].vert_descriptors)
             release_descriptor_sets(descriptor);
         for (auto &descriptor : frames[i].frag_descriptors)

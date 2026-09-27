@@ -20,6 +20,7 @@
 #include "renderer/vulkan/state.h"
 #include "util/log.h"
 #include "vkutil/vkutil.h"
+#include <util/ios_runtime_tuning.h>
 #include <util/render_diagnostics.h>
 
 #include <algorithm>
@@ -275,6 +276,10 @@ void ScreenRenderer::create_swapchain() {
     LOG_INFO("Swapchain extent: {}x{}, window: {}x{}", extent.width, extent.height,
         window_extent.width, window_extent.height);
     swapchain_size = surface_capabilities.minImageCount + 1;
+#ifdef VITA3K_PLATFORM_IOS
+    // Request double buffering, honoring the driver's actual supported range.
+    swapchain_size = ios_runtime::swapchain_images(surface_capabilities.minImageCount, surface_capabilities.maxImageCount);
+#endif
     if (surface_capabilities.maxImageCount != 0)
         swapchain_size = std::min(swapchain_size, surface_capabilities.maxImageCount);
 

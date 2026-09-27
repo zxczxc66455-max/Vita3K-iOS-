@@ -48,6 +48,9 @@ struct TextureCacheEntry {
     bool is_cube;
     uint16_t mip_count;
     uint32_t memory_needed;
+#ifdef VITA3K_PLATFORM_IOS
+    uint64_t last_used_seconds = 0;
+#endif
 };
 
 struct VKTextureCache : public TextureCache {
@@ -83,12 +86,28 @@ struct VKTextureCache : public TextureCache {
         return samplers[last_bound_sampler_index];
     }
 
+#ifdef VITA3K_PLATFORM_IOS
+    uint64_t last_idle_sweep_seconds = 0;
+    void retire_idle(uint64_t now);
+#endif
     void cleanup();
 };
+
+#ifdef VITA3K_PLATFORM_IOS
+struct DescriptorPack {
+    vk::DescriptorPool pool;
+    size_t end_index;
+    uint64_t last_used_seconds;
+};
+#endif
 
 struct FrameDescriptor {
     std::vector<vk::DescriptorSet> sets;
     int descriptors_idx = 0;
+#ifdef VITA3K_PLATFORM_IOS
+    // Pools belong to one frame slot and can only be retired after its fences.
+    std::vector<DescriptorPack> packs;
+#endif
 };
 
 struct FrameObject {
@@ -108,6 +127,9 @@ struct FrameObject {
 
     // descriptor for the color surface
     FrameDescriptor color_descriptor;
+#ifdef VITA3K_PLATFORM_IOS
+    uint64_t cache_clock_seconds = 0;
+#endif
 
     // destroy gpu objects MAX_FRAMES_RENDERING frames later to make sure they are no longer being used
     vkutil::DestroyQueue destroy_queue;

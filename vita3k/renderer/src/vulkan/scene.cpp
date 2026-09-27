@@ -129,6 +129,11 @@ static vk::DescriptorSet retrieve_descriptor(VKContext &context, bool is_vertex,
 
     VKState &state = context.state;
     FrameDescriptor &frame_descriptor = is_vertex ? state.frame().vert_descriptors[textures_count - 1] : state.frame().frag_descriptors[textures_count - 1];
+#ifdef VITA3K_PLATFORM_IOS
+    return retrieve_frame_descriptor(state, frame_descriptor,
+        is_vertex ? state.pipeline_cache.vertex_textures_layout[textures_count] : state.pipeline_cache.fragment_textures_layout[textures_count],
+        vk::DescriptorType::eCombinedImageSampler, textures_count, 32);
+#else
     if (frame_descriptor.descriptors_idx < frame_descriptor.sets.size())
         return frame_descriptor.sets[frame_descriptor.descriptors_idx++];
 
@@ -166,6 +171,7 @@ static vk::DescriptorSet retrieve_descriptor(VKContext &context, bool is_vertex,
     }
 
     return frame_descriptor.sets[frame_descriptor.descriptors_idx++];
+#endif
 }
 
 static void draw_bind_descriptors(VKContext &context, MemState &mem) {

@@ -55,6 +55,13 @@ void sync_viewport_real(VKContext &context, const float xOffset, const float yOf
 void sync_visibility_buffer(VKContext &context, Ptr<uint32_t> buffer, uint32_t stride);
 void sync_visibility_index(VKContext &context, bool enable, uint32_t index, bool is_increment);
 
+#ifdef VITA3K_PLATFORM_IOS
+struct FrameDescriptor;
+vk::DescriptorSet retrieve_frame_descriptor(VKState &state, FrameDescriptor &descriptor,
+    vk::DescriptorSetLayout layout, vk::DescriptorType type, uint32_t count, uint32_t pack_size);
+void retire_frame_descriptors(vk::Device device, FrameDescriptor &descriptor, uint64_t now, int idle_seconds);
+#endif
+
 void refresh_pipeline(VKContext &context);
 
 } // namespace renderer::vulkan

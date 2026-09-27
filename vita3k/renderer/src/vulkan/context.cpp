@@ -24,6 +24,7 @@
 #include <gxm/functions.h>
 #include <renderer/functions.h>
 
+#include <chrono>
 #include <util/ios_runtime_tuning.h>
 #include <util/log.h>
 #include <util/overloaded.h>
@@ -280,10 +281,59 @@ void VKContext::start_recording(bool first_in_scene) {
     }
 }
 
+#ifdef VITA3K_PLATFORM_IOS
+// All allocation and binding happens on the render consumer, never producer
+// guest threads. Small packs grow on demand instead of reserving for all slots.
+vk::DescriptorSet retrieve_frame_descriptor(VKState &state, FrameDescriptor &descriptor,
+    vk::DescriptorSetLayout layout, vk::DescriptorType type, uint32_t count, uint32_t pack_size) {
+    if (static_cast<size_t>(descriptor.descriptors_idx) == descriptor.sets.size()) {
+        vk::DescriptorPoolSize size{ type, count * pack_size };
+        vk::DescriptorPoolCreateInfo info{};
+        info.maxSets = pack_size;
+        info.setPoolSizes(size);
+        const auto pool = state.device.createDescriptorPool(info);
+        try {
+            std::vector<vk::DescriptorSetLayout> layouts(pack_size, layout);
+            vk::DescriptorSetAllocateInfo allocation{};
+            allocation.descriptorPool = pool;
+            allocation.setSetLayouts(layouts);
+            const auto sets = state.device.allocateDescriptorSets(allocation);
+            // Reserve before taking ownership so exceptions leave no stale handles.
+            descriptor.sets.reserve(descriptor.sets.size() + sets.size());
+            descriptor.packs.push_back({ pool, descriptor.sets.size() + sets.size(), state.frame().cache_clock_seconds });
+            descriptor.sets.insert(descriptor.sets.end(), sets.begin(), sets.end());
+        } catch (...) {
+            state.device.destroyDescriptorPool(pool);
+            throw;
+        }
+    }
+    const size_t index = descriptor.descriptors_idx++;
+    descriptor.packs[index / pack_size].last_used_seconds = state.frame().cache_clock_seconds;
+    return descriptor.sets[index];
+}
+
+// Called only after waiting for this slot's fences and resetting command pools.
+// Retain hot packs; release idle tails without invalidating any live descriptor.
+void retire_frame_descriptors(vk::Device device, FrameDescriptor &descriptor, uint64_t now, int idle_seconds) {
+    while (!descriptor.packs.empty()
+        && ios_runtime::cache_expired(now, descriptor.packs.back().last_used_seconds, idle_seconds)) {
+        device.destroyDescriptorPool(descriptor.packs.back().pool);
+        descriptor.packs.pop_back();
+        descriptor.sets.resize(descriptor.packs.empty() ? 0 : descriptor.packs.back().end_index);
+    }
+    descriptor.descriptors_idx = 0;
+}
+#endif
+
 // we only need one descriptor per scene, so this does not need to be too big
 static constexpr uint32_t DESCRIPTOR_PACK_SIZE = 16;
 
 static vk::DescriptorSet retrieve_color_descriptor(VKState &state, FrameDescriptor &frame_descriptor) {
+#ifdef VITA3K_PLATFORM_IOS
+    return retrieve_frame_descriptor(state, frame_descriptor, state.pipeline_cache.attachments_layout,
+        state.features.support_shader_interlock ? vk::DescriptorType::eStorageImage : vk::DescriptorType::eInputAttachment,
+        1, DESCRIPTOR_PACK_SIZE);
+#else
     if (frame_descriptor.descriptors_idx < frame_descriptor.sets.size())
         return frame_descriptor.sets[frame_descriptor.descriptors_idx++];
 
@@ -321,6 +371,7 @@ static vk::DescriptorSet retrieve_color_descriptor(VKState &state, FrameDescript
     }
 
     return frame_descriptor.sets[frame_descriptor.descriptors_idx++];
+#endif
 }
 
 void VKContext::start_render_pass(bool create_descriptor_set) {
@@ -616,6 +667,17 @@ void new_frame(VKContext &context) {
     device.resetCommandPool(frame.prerender_pool, reset_flags);
     device.resetCommandPool(frame.render_pool, reset_flags);
 
+#ifdef VITA3K_PLATFORM_IOS
+    frame.cache_clock_seconds = std::chrono::duration_cast<std::chrono::seconds>(
+        std::chrono::steady_clock::now().time_since_epoch())
+                                    .count();
+    for (int i = 0; i < 16; ++i) {
+        retire_frame_descriptors(device, frame.vert_descriptors[i], frame.cache_clock_seconds, ios_runtime::tuning.idle_cache_seconds);
+        retire_frame_descriptors(device, frame.frag_descriptors[i], frame.cache_clock_seconds, ios_runtime::tuning.idle_cache_seconds);
+    }
+    retire_frame_descriptors(device, frame.color_descriptor, frame.cache_clock_seconds, ios_runtime::tuning.idle_cache_seconds);
+#endif
+
     // set the position in the used descriptor queue back to the beginning
     for (int i = 0; i < 16; i++) {
         frame.vert_descriptors[i].descriptors_idx = 0;
@@ -625,6 +687,10 @@ void new_frame(VKContext &context) {
 
     // deferred destruction of the objects
     frame.destroy_queue.destroy_objects();
+#ifdef VITA3K_PLATFORM_IOS
+    // Queue newly retired images AFTER draining: other slots may still use them.
+    context.state.texture_cache.retire_idle(frame.cache_clock_seconds);
+#endif
 
     context.last_vert_texture_count = ~0;
     context.last_frag_texture_count = ~0;

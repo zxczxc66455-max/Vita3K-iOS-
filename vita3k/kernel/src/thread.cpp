@@ -17,6 +17,7 @@
 
 #include <cpu/functions.h>
 #include <kernel/thread/thread_state.h>
+#include <util/ios_thread_policy.h>
 
 #include <kernel/state.h>
 #include <mem/ptr.h>
@@ -196,6 +197,7 @@ void ThreadState::exit_delete(bool exit) {
 }
 
 void ThreadState::run_loop() {
+    ios_runtime::configure_thread(ios_runtime::ThreadRole::Guest);
     bool guest_returned = false;
 
     // Set thread-local CPU state so signal handlers can access it.

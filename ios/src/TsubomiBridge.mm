@@ -354,6 +354,10 @@ id bridge_games() {
         @"CPU architecture": architecture,
         @"Logical CPUs": [NSString stringWithFormat:@"%ld active / %ld total", (long)process.activeProcessorCount, (long)process.processorCount],
         @"GPU": gpuName,
+        @"Metal bindings": ios_runtime::tuning.metal_argument_buffers ? @"Argument buffers" : @"Legacy",
+        @"Idle cache timeout": ios_runtime::tuning.idle_cache_seconds == 0 ? @"Off"
+            : [NSString stringWithFormat:@"%d seconds", ios_runtime::tuning.idle_cache_seconds],
+        @"AvPlayer policy": ios_runtime::tuning.prefer_hle_avplayer ? @"Prefer HLE" : @"Game module settings",
         @"Physical RAM": [NSString stringWithFormat:@"%.0f MiB", process.physicalMemory / 1048576.0],
         @"App memory": footprint,
         @"Memory headroom": [NSString stringWithFormat:@"%.0f MiB", os_proc_available_memory() / 1048576.0],

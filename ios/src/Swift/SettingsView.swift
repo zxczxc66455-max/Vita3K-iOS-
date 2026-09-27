@@ -27,6 +27,11 @@ struct SettingsView: View {
     private var normalListArtwork = NormalListArtwork.coverArt.rawValue
     @AppStorage(LibrarySortOption.defaultsKey)
     private var librarySort = LibrarySortOption.alphabetical.rawValue
+    @AppStorage("tsubomi.metalArgumentBuffers") private var metalArgumentBuffers = 0
+    @AppStorage("tsubomi.idleCacheSeconds") private var idleCacheSeconds = 45
+    @AppStorage("tsubomi.preferHLEAvPlayer") private var preferHLEAvPlayer = false
+    @State private var showingA11Confirmation = false
+    @State private var profileApplied = false
     @AppStorage("tsubomi.cpuBackend") private var cpuBackend = 0
     @AppStorage("tsubomi.guestMemoryMiB") private var guestMemoryMiB = 768
     @AppStorage("tsubomi.precompileShaders") private var precompileShaders = false
@@ -54,6 +59,21 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             Form {
+                if !model.isPerGame {
+                    Section {
+                        NavigationLink {
+                            settingsPage("Performance & Memory") {
+                                performanceProfileSection
+                                memorySection
+                                metalSection
+                            }
+                        } label: {
+                            Label("Performance & Memory", systemImage: "speedometer")
+                        }
+                    } footer: {
+                        Text("Tune memory use and graphics for your device. Changes apply after restarting the app.")
+                    }
+                }
                 Section("Emulation") {
                     NavigationLink {
                         settingsPage("Graphics & Display") { videoSection; graphicsSection }
@@ -209,6 +229,8 @@ struct SettingsView: View {
     private func settingsPage<Content: View>(_ title: String,
         @ViewBuilder content: () -> Content) -> some View {
         Form { content() }
+            .scrollContentBackground(.hidden)
+            .background(InterfaceTheme.background)
             .navigationTitle(title)
             .navigationBarTitleDisplayMode(.inline)
             .onDisappear { model.save() }
@@ -243,7 +265,7 @@ struct SettingsView: View {
         Group {
             Section("Runtime") {
                 LabeledContent("JIT status", value: library.jitAvailable ? "Available (last core check)" : "Unavailable / not checked")
-                ForEach(["Active CPU backend", "Renderer", "App version"], id: \.self) { key in
+                ForEach(["Active CPU backend", "Renderer", "Metal bindings", "Idle cache timeout", "AvPlayer policy", "App version"], id: \.self) { key in
                     LabeledContent(key, value: deviceInformation[key] ?? "Unknown")
                 }
             }
@@ -259,6 +281,52 @@ struct SettingsView: View {
                 Button("Refresh snapshot") { deviceInformation = Bridge.deviceInformation }
             } header: { Text("Current Snapshot") } footer: {
                 Text("Values update when this page opens or you refresh. Memory headroom is the OS estimate for this process; it is not total free RAM. JIT availability can change after the core's check.")
+            }
+        }
+    }
+
+    private var performanceProfileSection: some View {
+        Section {
+            Button("Apply A11 memory profile") { showingA11Confirmation = true }
+                .confirmationDialog("Apply A11 memory profile?", isPresented: $showingA11Confirmation, titleVisibility: .visible) {
+                    Button("Apply profile") {
+                        guestMemoryMiB = 768
+                        jitCacheMiB = 8
+                        cpuExecutionThreads = 0
+                        shaderWorkers = 1
+                        textureCacheEntries = 128
+                        trimStagingBuffers = true
+                        idleCacheSeconds = 45
+                        metalArgumentBuffers = 1
+                        precompileShaders = false
+                        profileApplied = true
+                    }
+                } message: {
+                    Text("Sets an 8 MiB JIT cache per thread, one shader worker, 128 cached textures and legacy Metal bindings. Sets guest RAM to 768 MiB. Restart the app to apply.")
+                }
+            if profileApplied {
+                Label("Profile saved. Restart the app to apply.", systemImage: "checkmark.circle")
+                    .foregroundStyle(InterfaceTheme.accent)
+            }
+            NavigationLink("CPU & JIT") { settingsPage("CPU & JIT") { cpuSection } }
+            NavigationLink("Shader compilation") { settingsPage("Shaders") { shaderSection } }
+        } header: { Text("Device profile") } footer: {
+            Text("A starting point for iPhone 8, 8 Plus and X. Smaller caches can cause recompilation or uploads; compare the same scene on your device.")
+        }
+    }
+
+    private var metalSection: some View {
+        Section {
+            Picker("Metal resource bindings", selection: $metalArgumentBuffers) {
+                Text("Automatic for this device").tag(0)
+                Text("Legacy bindings").tag(1)
+                Text("Argument buffers").tag(2)
+            }
+            Toggle("Use HLE video player", isOn: $preferHLEAvPlayer)
+        } header: { Text("Graphics & Media") } footer: {
+            settingsHelp {
+                Text("Automatic uses legacy bindings on A11 and argument buffers on newer devices. Requires an app restart. Try Automatic again if legacy bindings cause missing graphics.")
+                Text("HLE video player uses the existing host decoder instead of Vita AvPlayer firmware. It is optional because some games rely on firmware behavior. Other required firmware modules remain enabled. This does not enable Apple hardware video decoding.")
             }
         }
     }
@@ -319,10 +387,17 @@ struct SettingsView: View {
                 }
             }
             Toggle("Reclaim unused GPU buffer memory", isOn: $trimStagingBuffers)
+            Picker("Release idle graphics caches", selection: $idleCacheSeconds) {
+                Text("Off").tag(0)
+                ForEach([30, 45, 60], id: \.self) { seconds in
+                    Text("After \(seconds) seconds").tag(seconds)
+                }
+            }
             Button("Reset memory settings") {
                 guestMemoryMiB = 768
                 textureCacheEntries = 0
                 trimStagingBuffers = true
+                idleCacheSeconds = 45
             }
         } header: {
             Text("Allocation & Caches")
@@ -331,6 +406,7 @@ struct SettingsView: View {
                 Text("Saved immediately. Close and reopen Tsubomi to apply these memory settings.")
                 Text("Guest RAM limits memory allocated by the emulated game. The default is 768 MiB; games that need more may fail to allocate memory. JIT code, GPU resources and the interface use additional RAM.")
                 Text("Texture cache limits count textures, not MiB. Smaller caches use fewer entries but may cause more uploads and stutter.")
+                Text("Idle textures and unused descriptor pools are retired during rendering after the chosen timeout. GPU resources are freed only after their fences complete. Compiled shaders are kept to avoid compilation stutter.")
                 Text("GPU buffer reclamation releases oversized upload buffers after the GPU finishes using them. Reset restores only the settings on this page.")
             }
         }

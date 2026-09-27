@@ -20,6 +20,7 @@
 #include <renderer/functions.h>
 #include <renderer/state.h>
 #include <renderer/types.h>
+#include <util/ios_thread_policy.h>
 
 #include <renderer/vulkan/types.h>
 
@@ -129,50 +130,38 @@ static void process_batch(renderer::State &state, const FeatureState &features, 
 }
 
 void process_batches(renderer::State &state, const FeatureState &features, MemState &mem, Config &config, int64_t max_wait_ms) {
-    auto max_time = duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count() + max_wait_ms;
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(max_wait_ms);
+    using PopResult = Queue<CommandList>::PopResult;
 
     while (!state.should_display) {
-        if (state.render_abort.load(std::memory_order_relaxed))
+        if (state.render_abort.load(std::memory_order_relaxed)
+            || state.async_flip_requested.load(std::memory_order_relaxed))
             return;
 
-        // overlay requested an async present
-        if (state.async_flip_requested.load(std::memory_order_relaxed))
+        // Deferred chains are already linked into an immediate command list.
+        // Consume each ready batch with one queue lock and no per-list heap
+        // allocation. Vulkan state stays on this single render consumer;
+        // parallel recording against its shared caches would race.
+        CommandList command_list{};
+        const auto result = state.command_buffer_queue.pop_if(command_list, [&](CommandList &list) { return is_cmd_ready(mem, list); }, std::chrono::microseconds(3000));
+        if (result == PopResult::Aborted)
             return;
-
-        // Try to wait for a batch (about 2 or 3ms, game should be fast for this)
-        auto cmd_list = state.command_buffer_queue.top(3);
-
-        if (!cmd_list || !is_cmd_ready(mem, *cmd_list)) {
-            // beginning of the game or homebrew not using gxm
+        if (result != PopResult::Ready) {
             if (state.context == nullptr)
                 return;
-
-            // keep the old behavior for opengl with vsync as it looks like the new one causes some issues
             if (state.current_backend == Backend::OpenGL && config.current_config.v_sync)
                 return;
 
-            renderer::SyncWaitResult wait_result = renderer::SyncWaitResult::TimedOut;
-            if (cmd_list)
-                wait_result = wait_cmd(mem, *cmd_list);
-            if (!cmd_list || wait_result != renderer::SyncWaitResult::Ready) {
-                if (wait_result == renderer::SyncWaitResult::Shutdown)
-                    return;
-
-                if (state.async_flip_requested.load(std::memory_order_relaxed))
-                    return;
-
-                auto curr_time = duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
-                if (curr_time >= max_time)
-                    // display a frame even though the game is not diplaying anything
-                    return;
-
-                // this mean the command is still not ready, check if we can display it again
-                continue;
-            }
+            if (result == PopResult::Blocked && wait_cmd(mem, command_list) == renderer::SyncWaitResult::Shutdown)
+                return;
+            if (std::chrono::steady_clock::now() >= deadline)
+                return;
+            // Recheck the queued head under the lock after a sync wait. Do not
+            // prefetch across a wait or a display boundary.
+            continue;
         }
 
-        state.command_buffer_queue.pop();
-        process_batch(state, features, mem, config, *cmd_list);
+        process_batch(state, features, mem, config, command_list);
         state.batches_processed.fetch_add(1, std::memory_order_relaxed);
     }
 }
@@ -183,6 +172,7 @@ void reset_command_list(CommandList &command_list) {
 }
 
 static void render_loop(renderer::State &state, DisplayState &display, GxmState &gxm, MemState &mem, Config &config) {
+    ios_runtime::configure_thread(ios_runtime::ThreadRole::Render);
     if (state.precompile_requested) {
         auto progress_overlay = state.overlay_manager
             ? state.overlay_manager->create<overlay::shader_precompile_progress>()

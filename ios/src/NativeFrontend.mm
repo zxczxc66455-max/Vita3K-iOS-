@@ -4,6 +4,7 @@
 #include <vita3k_ios/NativeFrontend.h>
 #include <vita3k_ios/VirtualController.h>
 #include <util/ios_runtime_tuning.h>
+#include <sys/utsname.h>
 #include <util/render_diagnostics.h>
 #include <vita3k_ios/OverlayLayout.h>
 #include <cstdlib>
@@ -2036,11 +2037,20 @@ void vita3k_ios_autorelease(const std::function<void()> &body) {
 void vita3k_ios_load_runtime_preferences() {
     @autoreleasepool {
         NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
+        struct utsname hardware {};
+        ios_runtime::tuning.a11_device = uname(&hardware) == 0 && ios_runtime::is_a11(hardware.machine);
+        ios_runtime::tuning.metal_argument_buffers = ios_runtime::metal_argument_buffers(
+            static_cast<int>([defaults integerForKey:@"tsubomi.metalArgumentBuffers"]), ios_runtime::tuning.a11_device);
+        ios_runtime::tuning.idle_cache_seconds = [defaults objectForKey:@"tsubomi.idleCacheSeconds"] == nil
+            ? 45 : ios_runtime::idle_cache_seconds(static_cast<int>([defaults integerForKey:@"tsubomi.idleCacheSeconds"]));
+        // Configure before the Vulkan instance, including drivers without layer settings.
+        setenv("MVK_CONFIG_USE_METAL_ARGUMENT_BUFFERS", ios_runtime::tuning.metal_argument_buffers ? "1" : "0", 1);
         ios_runtime::tuning.cpu_backend = ios_runtime::cpu_backend(static_cast<int>([defaults integerForKey:@"tsubomi.cpuBackend"]));
         ios_runtime::tuning.guest_memory_mib = ios_runtime::guest_memory_mib(static_cast<int>([defaults integerForKey:@"tsubomi.guestMemoryMiB"]));
         ios_runtime::tuning.jit_cache_mib = static_cast<int>([defaults integerForKey:@"tsubomi.jitCacheMiB"]);
         ios_runtime::tuning.cpu_execution_threads = static_cast<int>([defaults integerForKey:@"tsubomi.cpuExecutionThreads"]);
         ios_runtime::tuning.shader_workers = static_cast<int>([defaults integerForKey:@"tsubomi.shaderWorkers"]);
+        ios_runtime::tuning.prefer_hle_avplayer = [defaults boolForKey:@"tsubomi.preferHLEAvPlayer"];
         ios_runtime::tuning.metal_hud_requested = [defaults boolForKey:@"MetalHUDForceEnabled"];
         // Apple's documented environment route must be set before renderer
         // initialization; changing only the preference did not show the HUD on

@@ -16,6 +16,7 @@
 // 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 
 #include <renderer/vulkan/pipeline_cache.h>
+#include <util/ios_thread_policy.h>
 
 #include <renderer/vulkan/gxm_to_vulkan.h>
 #include <renderer/vulkan/state.h>
@@ -825,6 +826,7 @@ vk::PipelineVertexInputStateCreateInfo PipelineCache::get_vertex_input_state(con
 }
 
 void PipelineCache::compiler_thread(MemState &mem) {
+    ios_runtime::configure_thread(ios_runtime::ThreadRole::ShaderCompiler);
     moodycamel::ConsumerToken consumer_token(pipeline_compile_queue);
 
     // just a single loop, waiting for a pipeline compile request and compiling it

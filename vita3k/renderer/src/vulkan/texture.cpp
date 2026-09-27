@@ -58,7 +58,34 @@ static bool is_depth_stencil_compatible_format(SceGxmTextureBaseFormat format, b
 VKTextureCache::VKTextureCache(VKState &state)
     : state(state) {}
 
+#ifdef VITA3K_PLATFORM_IOS
+void VKTextureCache::retire_idle(uint64_t now) {
+    if (ios_runtime::tuning.idle_cache_seconds == 0 || now == last_idle_sweep_seconds)
+        return;
+    last_idle_sweep_seconds = now;
+    // This bounded cache is owned by the render thread. iOS uses hashing, so
+    // no protection callback can retain an entry being removed here.
+    for (auto it = texture_lookup.begin(); it != texture_lookup.end();) {
+        auto *info = it->second;
+        auto &entry = textures[info->index];
+        if (!ios_runtime::cache_expired(now, entry.last_used_seconds, ios_runtime::tuning.idle_cache_seconds)) {
+            ++it;
+            continue;
+        }
+        state.frame().destroy_queue.add_image(entry.texture);
+        info->texture_size = 0;
+        info->is_imported = false;
+        texture_queue.set_as_lru(info);
+        auto expired = it++;
+        texture_lookup.erase(expired);
+    }
+}
+#endif
+
 void VKTextureCache::cleanup() {
+#ifdef VITA3K_PLATFORM_IOS
+    last_idle_sweep_seconds = 0;
+#endif
     for (auto &entry : textures) {
         if (entry.texture.image)
             entry.texture.destroy();
@@ -333,6 +360,9 @@ bool VKTextureCache::init(const bool hashless_texture_cache, const fs::path &tex
 
 void VKTextureCache::select(size_t index, const SceGxmTexture &texture) {
     current_texture = &textures[index];
+#ifdef VITA3K_PLATFORM_IOS
+    current_texture->last_used_seconds = state.frame().cache_clock_seconds;
+#endif
     is_texture_transfer_ready = false;
 }
 

@@ -16,6 +16,7 @@
 // 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 
 #include <module/load_module.h>
+#include <util/ios_runtime_tuning.h>
 
 #include <config/state.h>
 #include <emuenv/state.h>
@@ -162,6 +163,10 @@ static constexpr auto auto_lle_modules = {
 };
 
 bool is_lle_module(SceSysmoduleModuleId module_id, EmuEnvState &emuenv) {
+#ifdef VITA3K_PLATFORM_IOS
+    if (ios_runtime::tuning.prefer_hle_avplayer && module_id == SCE_SYSMODULE_AVPLAYER)
+        return false;
+#endif
     const auto &paths = sysmodule_paths[module_id];
 
     // Do we know the module and its dependencies' paths?
@@ -195,9 +200,11 @@ static std::vector<std::string> init_auto_lle_module_names() {
 }
 
 bool is_lle_module(const std::string &module_name, EmuEnvState &emuenv) {
-    static std::vector<std::string> auto_lle_module_names{};
-    if (auto_lle_module_names.empty())
-        auto_lle_module_names = init_auto_lle_module_names();
+#ifdef VITA3K_PLATFORM_IOS
+    if (ios_runtime::tuning.prefer_hle_avplayer && module_name == "libsceavplayer")
+        return false;
+#endif
+    static const auto auto_lle_module_names = init_auto_lle_module_names();
     if (emuenv.cfg.current_config.modules_mode != ModulesMode::AUTOMATIC) {
         if (std::ranges::contains(emuenv.cfg.current_config.lle_modules, module_name))
             return true;

@@ -25,19 +25,33 @@ struct Device {
 };
 }
 struct Descriptor { int descriptors_idx = 9; };
+#ifdef VITA3K_PLATFORM_IOS
+static int retired_descriptors = 0;
+static void retire_frame_descriptors(vk::Device, Descriptor &descriptor, uint64_t, int) {
+    // The fence and both command-pool resets must precede retirement.
+    assert(events.size() == 4 && (events.back() == 3 || events.back() == 4));
+    ++retired_descriptors;
+    descriptor.descriptors_idx = 0;
+}
+#endif
 struct FrameObject {
     std::vector<int> rendered_fences;
     int prerender_pool = 0, render_pool = 1;
     std::array<Descriptor,16> vert_descriptors, frag_descriptors;
     Descriptor color_descriptor;
     struct { void destroy_objects() { events.push_back(5); } } destroy_queue;
-    uint64_t frame_timestamp = 0;
+    uint64_t frame_timestamp = 0, cache_clock_seconds = 0;
 };
 struct FrameDoneRequest { uint64_t timestamp; };
 struct State {
     struct { bool enable_memory_mapping = false; } features;
     struct { void push(FrameDoneRequest) { events.push_back(0); } } request_queue;
     struct { void clear_surfaces_changed() {} } surface_cache;
+    struct {
+        void retire_idle(uint64_t) {
+            assert(events.back() == 5); // Newly queued images cannot be drained in this visit.
+        }
+    } texture_cache;
     int current_frame_idx = 0;
     vk::Device device;
     std::array<FrameObject, MAX_FRAMES_RENDERING> frames;
@@ -75,6 +89,9 @@ int main() {
         new_frame(context);
         assert(events == std::vector<int>({0, 2, 3, 3, 5}));
     }
+#ifdef VITA3K_PLATFORM_IOS
+    assert(retired_descriptors == 2 * 726 * 33);
+#endif
     Queue<int> queue;
     queue.maxPendingCount_ = 8;
     for (int i = 0; i < 8; ++i) queue.push(i);
