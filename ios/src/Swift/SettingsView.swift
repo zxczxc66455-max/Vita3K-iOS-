@@ -101,6 +101,8 @@ struct SettingsView: View {
                     perGameResetSection
                 }
             }
+            .scrollContentBackground(.hidden)
+            .background(InterfaceTheme.background)
             .onDisappear { model.save() }
             .onChange(of: scenePhase) { phase in
                 if phase != .active { model.save() }
@@ -130,6 +132,7 @@ struct SettingsView: View {
                 Button("OK", role: .cancel) {}
             }
         }
+        .tint(InterfaceTheme.accent)
     }
 
     // MARK: - Sections

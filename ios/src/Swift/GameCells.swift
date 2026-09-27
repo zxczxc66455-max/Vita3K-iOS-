@@ -4,17 +4,27 @@ extension View {
     /// The game-controller focus indicator.
     ///
     /// Drawn only while a pad is actually driving the library, so touch users
-    /// never see a ring. Uses `.accentColor` rather than a fixed colour so it
-    /// follows the system tint and stays visible in both appearances, and sits
+    /// never see a ring. Uses the adaptive interface accent so it
+    /// stays visible in both appearances, and sits
     /// outside the content (a stroke inset would clip the cover art).
     func padFocusRing(isFocused: Bool) -> some View {
-        overlay {
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .strokeBorder(Color.accentColor, lineWidth: 3)
-                .opacity(isFocused ? 1 : 0)
-                .padding(-4)
+        modifier(PadFocusModifier(isFocused: isFocused))
+    }
+}
+
+private struct PadFocusModifier: ViewModifier {
+    let isFocused: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    func body(content: Content) -> some View {
+        content.overlay {
+            if isFocused {
+                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    .strokeBorder(InterfaceTheme.accent, lineWidth: 3)
+                    .padding(-4)
+            }
         }
-        .animation(.compatibilitySnappy(duration: 0.15), value: isFocused)
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.15), value: isFocused)
         .accessibilityAddTraits(isFocused ? .isSelected : [])
     }
 }
@@ -95,7 +105,7 @@ struct GameCover: View {
         } else {
             Image(systemName: "gamecontroller.fill")
                 .font(.largeTitle)
-                .foregroundStyle(.pink)
+                .foregroundStyle(InterfaceTheme.accent)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(Color(uiColor: .secondarySystemFill))
         }
@@ -152,7 +162,7 @@ struct GameCard: View {
     @AppStorage(DefaultsKey.showTitleIDs.rawValue) private var showTitleIDs = true
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 10) {
             GameCover(game: game, allowsWide: true)
             // Reserves two lines whether the title needs them or not, so a
             // one-line title and a two-line title produce the same card height
@@ -164,7 +174,7 @@ struct GameCard: View {
             if showTitleIDs {
                 Text(game.titleID)
                     .font(.caption2)
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(.secondary)
                     .lineLimit(1)
             }
             GameMetadata(game: game)
@@ -173,12 +183,8 @@ struct GameCard: View {
         // A little more room at the bottom so the last metadata line does not
         // sit right against the card edge.
         .padding(EdgeInsets(top: 10, leading: 10, bottom: 14, trailing: 10))
-        // The library uses systemBackground, not a grouped-list background.
-        // secondarySystemGroupedBackground is white in Light Mode and made the
-        // card disappear into its white parent. This matching non-grouped
-        // semantic level stays distinct in both appearances.
-        .background(Color(.secondarySystemBackground),
-                    in: RoundedRectangle(cornerRadius: 26, style: .continuous))
+        .background(InterfaceTheme.surface,
+                    in: RoundedRectangle(cornerRadius: 22, style: .continuous))
         .accessibilityElement(children: .combine)
     }
 }
@@ -230,7 +236,7 @@ struct GameRow: View {
                 if showTitleIDs {
                     Text(game.titleID)
                         .font(.caption2)
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(.secondary)
                 }
                 GameMetadata(game: game)
             }

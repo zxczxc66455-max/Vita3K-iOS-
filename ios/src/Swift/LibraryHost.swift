@@ -15,7 +15,7 @@ final class LibraryHost: NSObject {
         // Opaque: this view sits over the game's Metal drawable, and anything
         // it does not paint is a window onto the last frame the game rendered.
         // LibraryView paints its own background too; both are deliberate.
-        controller.view.backgroundColor = .systemBackground
+        controller.view.backgroundColor = InterfaceTheme.backgroundColor
         controller.view.isOpaque = true
         return controller
     }

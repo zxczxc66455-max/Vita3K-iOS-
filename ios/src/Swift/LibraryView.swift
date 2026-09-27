@@ -45,10 +45,13 @@ struct LibraryView: View {
             // background for this reason; putting it on `content` inside the
             // NavigationStack was not enough, because the stack draws into
             // regions that background does not cover.
-            Color(.systemBackground).ignoresSafeArea()
+            InterfaceTheme.background.ignoresSafeArea()
 
             NavigationStack {
                 content
+                    .background(InterfaceTheme.background)
+                    .toolbarBackground(InterfaceTheme.background, for: .navigationBar, .bottomBar)
+                    .toolbarBackground(.visible, for: .navigationBar, .bottomBar)
                     // Inline, centred title. iOS left-aligns the large title
                     // and offers no way to centre it; a centred principal item
                     // is the standard way to get a centred, still-prominent
@@ -84,6 +87,7 @@ struct LibraryView: View {
                     }
             }
         }
+        .tint(InterfaceTheme.accent)
         // Cross on the focused game routes through the same gating as a tap.
         .onChange(of: library.padLaunchTarget) { target in
             guard let target else { return }
@@ -127,7 +131,9 @@ struct LibraryView: View {
                 VStack(spacing: 12) {
                     Image(systemName: "gamecontroller")
                         .font(.largeTitle)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(InterfaceTheme.accent)
+                        .padding(24)
+                        .background(InterfaceTheme.surface, in: RoundedRectangle(cornerRadius: 24))
                     Text("No Games").font(.title2.bold())
                     Text("Tap + to import a game").foregroundStyle(.secondary)
                 }
@@ -197,11 +203,13 @@ struct LibraryView: View {
                 listRow(game)
                     // Tighter insets in compact mode so the smaller rows pack
                     // closer together, which is the point of the density.
+                    .listRowBackground(InterfaceTheme.surface)
                     .listRowInsets(compactList
                         ? EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 16)
                         : EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
             }
-            .listStyle(.plain)
+            .listStyle(.insetGrouped)
+            .scrollContentBackground(.hidden)
             .refreshable { await refresh() }
             .onChange(of: library.focusedTitleID) { focused in
                 scrollToFocused(focused, using: scroller)
@@ -352,7 +360,7 @@ struct LibraryView: View {
                         .multilineTextAlignment(.center)
                 }
                 .padding(24)
-                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+                .background(InterfaceTheme.surface, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
                 .padding(40)
             }
             .transition(.opacity)
@@ -537,6 +545,7 @@ private struct DeleteConfirmationDialog: ViewModifier {
 /// would make it unreachable.
 @MainActor
 private struct LibraryJITBanner: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @ObservedObject var library: LibraryState
 
     var body: some View {
@@ -551,17 +560,18 @@ private struct LibraryJITBanner: View {
                 .font(.footnote.weight(.semibold))
                 .foregroundStyle(.black)
                 .padding(.horizontal, 12)
-                .padding(.vertical, 7)
+                .padding(.vertical, 10)
+                .frame(minHeight: 44)
                 // Sized to its text and centred, rather than a full-width bar.
                 // It is a standing condition, not an alert to be dismissed, so
                 // it should read as a small badge under the title instead of
                 // claiming a whole row of the library.
-                .compatibleGlass(in: Capsule(), tint: .yellow)
+                .background(Color(red: 0.96, green: 0.85, blue: 0.57), in: Capsule())
                 .frame(maxWidth: .infinity)
                 .padding(.bottom, 4)
             }
         }
-        .animation(.compatibilitySnappy(), value: library.jitAvailable)
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.18), value: library.jitAvailable)
     }
 }
 
@@ -569,6 +579,7 @@ private struct LibraryJITBanner: View {
 /// changes its layout when one arrives or times out.
 @MainActor
 private struct LibraryStatusToast: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @ObservedObject var library: LibraryState
 
     var body: some View {
@@ -578,12 +589,16 @@ private struct LibraryStatusToast: View {
                     .font(.subheadline)
                     .padding(.horizontal, 14)
                     .padding(.vertical, 8)
-                    .compatibleGlass(in: Capsule())
+                    .background(InterfaceTheme.surface, in: RoundedRectangle(cornerRadius: 16))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 16)
+                            .strokeBorder(Color(uiColor: .separator), lineWidth: 0.5)
+                    }
                     .padding(.top, 8)
-                    .transition(.move(edge: .top).combined(with: .opacity))
+                    .transition(reduceMotion ? .opacity : .move(edge: .top).combined(with: .opacity))
                     .allowsHitTesting(false)
             }
         }
-        .animation(.compatibilitySnappy(), value: library.statusMessage)
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.18), value: library.statusMessage)
     }
 }
