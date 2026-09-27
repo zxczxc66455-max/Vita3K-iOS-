@@ -1,4 +1,4 @@
-# Tsubomi
+# Tsubomi (fork focus on add more BUG)
 
 **Tsubomi** is an experimental PlayStation Vita emulator for iOS (iPhone/iPad).
 
